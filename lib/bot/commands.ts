@@ -16,10 +16,21 @@ const STATUS_EMOJI: Record<string, string> = {
   cancelled: '❌',
 };
 
+const VALID_STATUSES = Object.keys(STATUS_EMOJI);
+
+// Messages sent to users when admin updates their order status
+const USER_STATUS_MESSAGES: Partial<Record<string, string>> = {
+  processing: '⚙️ Ваш заказ принят в обработку.',
+  shipped: '🚚 Ваш заказ отправлен!',
+  delivered: '📦 Ваш заказ доставлен! Спасибо за покупку.',
+  cancelled: '❌ Ваш заказ отменён. Обратитесь к менеджеру для уточнений.',
+  paid: '✅ Оплата подтверждена. Ваш заказ обрабатывается.',
+};
+
 export function registerCommands(bot: Bot<Context>): void {
+  // /start
   bot.command('start', async (ctx) => {
     if (ctx.chat.type !== 'private') return;
-
     const user = ctx.from;
     if (!user) return;
 
@@ -85,7 +96,7 @@ export function registerCommands(bot: Bot<Context>): void {
     );
   });
 
-  // Inline button: My Orders
+  // User: My Orders
   bot.callbackQuery('my_orders', async (ctx) => {
     await ctx.answerCallbackQuery();
     const userId = ctx.from.id;
@@ -103,8 +114,7 @@ export function registerCommands(bot: Bot<Context>): void {
     }
 
     const lines = userOrders.map(
-      (o) =>
-        `• Заказ #${o.id} — ${STATUS_EMOJI[o.status] ?? ''} ${o.status} — $${o.totalUsdt} USDT`
+      (o) => `• Заказ #${o.id} — ${STATUS_EMOJI[o.status] ?? ''} ${o.status} — $${o.totalUsdt} USDT`
     );
 
     await ctx.reply(
@@ -113,7 +123,7 @@ export function registerCommands(bot: Bot<Context>): void {
     );
   });
 
-  // Inline button: Contact Manager
+  // User: Contact Manager
   bot.callbackQuery('contact_manager', async (ctx) => {
     await ctx.answerCallbackQuery();
     await ctx.reply(
@@ -121,19 +131,17 @@ export function registerCommands(bot: Bot<Context>): void {
     );
   });
 
-  // Inline button: Suggest a Product
+  // User: Suggest a Product
   bot.callbackQuery('suggest_product', async (ctx) => {
     await ctx.answerCallbackQuery();
     const keyboard = new InlineKeyboard().webApp(
       '💡 Открыть форму предложения',
       `${MINI_APP_URL}/suggest`
     );
-    await ctx.reply('Есть идея для товара? Заполните форму:', {
-      reply_markup: keyboard,
-    });
+    await ctx.reply('Есть идея для товара? Заполните форму:', { reply_markup: keyboard });
   });
 
-  // ADMIN: список последних диалогов
+  // Admin: Recent dialogs
   bot.callbackQuery('admin_dialogs', async (ctx) => {
     await ctx.answerCallbackQuery();
     if (!ADMIN_IDS.includes(ctx.from.id)) return;
@@ -165,7 +173,7 @@ export function registerCommands(bot: Bot<Context>): void {
     );
   });
 
-  // ADMIN: последние заказы
+  // Admin: Recent orders list with per-order management buttons
   bot.callbackQuery('admin_orders', async (ctx) => {
     await ctx.answerCallbackQuery();
     if (!ADMIN_IDS.includes(ctx.from.id)) return;
@@ -181,18 +189,130 @@ export function registerCommands(bot: Bot<Context>): void {
       return;
     }
 
-    const STATUS_EMOJI: Record<string, string> = {
-      pending: '🕐', awaiting_payment: '💳', paid: '✅',
-      processing: '⚙️', shipped: '🚚', delivered: '📦', cancelled: '❌',
-    };
-
     const lines = recent.map(
-      (o) => `• #${o.id} — ${STATUS_EMOJI[o.status] ?? '❓'} ${o.status} — $${o.totalUsdt} USDT — User #${o.userId}`
+      (o) =>
+        `• #${o.id} — ${STATUS_EMOJI[o.status] ?? '❓'} ${o.status} — $${o.totalUsdt} USDT — User #${o.userId}`
     );
+
+    // Buttons: up to 4 per row for compact display
+    const keyboard = new InlineKeyboard();
+    recent.forEach((o, i) => {
+      keyboard.text(`📝 #${o.id}`, `admin_order_${o.id}`);
+      if ((i + 1) % 4 === 0) keyboard.row();
+    });
 
     await ctx.reply(
       `📦 *Последние заказы:*\n\n${lines.join('\n')}`,
+      { parse_mode: 'Markdown', reply_markup: keyboard }
+    );
+  });
+
+  // Admin: Order detail + status change buttons
+  bot.callbackQuery(/^admin_order_(\d+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    if (!ADMIN_IDS.includes(ctx.from.id)) return;
+
+    const orderId = parseInt(ctx.match![1], 10);
+
+    const [order] = await db
+      .select()
+      .from(orders)
+      .where(eq(orders.id, orderId))
+      .limit(1);
+
+    if (!order) {
+      await ctx.reply('❌ Заказ не найден.');
+      return;
+    }
+
+    const items = await db
+      .select({
+        quantity: orderItems.quantity,
+        price: orderItems.priceUsdt,
+        name: products.name,
+      })
+      .from(orderItems)
+      .innerJoin(products, eq(orderItems.productId, products.id))
+      .where(eq(orderItems.orderId, orderId));
+
+    const itemLines = items.map((i) => `• ${i.name} × ${i.quantity} — $${i.price} USDT`);
+    const emoji = STATUS_EMOJI[order.status] ?? '❓';
+    const date = order.createdAt ? order.createdAt.toLocaleDateString('ru-RU') : '—';
+
+    const text =
+      `📦 *Заказ #${order.id}*\n\n` +
+      `👤 Пользователь: #${order.userId}\n` +
+      `💰 Сумма: $${order.totalUsdt} USDT\n` +
+      `📊 Статус: ${emoji} ${order.status}\n` +
+      `🕐 Создан: ${date}` +
+      (order.txHash ? `\n🔗 TX: \`${order.txHash}\`` : '') +
+      (itemLines.length ? `\n\n*Позиции:*\n${itemLines.join('\n')}` : '');
+
+    // Show all statuses except current; 2 per row
+    const statusOptions: Array<[string, string]> = [
+      ['awaiting_payment', '💳'],
+      ['paid', '✅'],
+      ['processing', '⚙️'],
+      ['shipped', '🚚'],
+      ['delivered', '📦'],
+      ['cancelled', '❌'],
+    ];
+
+    const keyboard = new InlineKeyboard();
+    let btnCount = 0;
+    for (const [status, statusEmoji] of statusOptions) {
+      if (status === order.status) continue;
+      keyboard.text(`${statusEmoji} ${status}`, `set_status_${order.id}_${status}`);
+      btnCount++;
+      if (btnCount % 2 === 0) keyboard.row();
+    }
+
+    await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+  });
+
+  // Admin: Apply status change, notify user
+  bot.callbackQuery(/^set_status_(\d+)_(.+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    if (!ADMIN_IDS.includes(ctx.from.id)) return;
+
+    const orderId = parseInt(ctx.match![1], 10);
+    const newStatus = ctx.match![2];
+
+    if (!VALID_STATUSES.includes(newStatus)) {
+      await ctx.reply('❌ Неверный статус.');
+      return;
+    }
+
+    const [updated] = await db
+      .update(orders)
+      .set({
+        status: newStatus,
+        ...(newStatus === 'paid' ? { paidAt: new Date() } : {}),
+      })
+      .where(eq(orders.id, orderId))
+      .returning();
+
+    if (!updated) {
+      await ctx.reply('❌ Заказ не найден.');
+      return;
+    }
+
+    await ctx.reply(
+      `✅ Статус заказа #${orderId} обновлён: ${STATUS_EMOJI[newStatus] ?? ''} *${newStatus}*`,
       { parse_mode: 'Markdown' }
     );
+
+    const userMsg = USER_STATUS_MESSAGES[newStatus];
+    if (userMsg && updated.userId) {
+      try {
+        await ctx.api.sendMessage(
+          updated.userId,
+          `${userMsg}\n\n*Заказ #${orderId}*`,
+          { parse_mode: 'Markdown' }
+        );
+      } catch (err) {
+        console.error(`[status] Failed to notify user ${updated.userId}:`, err);
+      }
+    }
   });
 }
