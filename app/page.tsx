@@ -23,7 +23,7 @@ export default function CatalogPage() {
   useEffect(() => {
     fetch('/api/products')
       .then((r) => r.json())
-      .then((data: Product[]) => setProducts(data))
+      .then((data) => setProducts(Array.isArray(data) ? data : []))
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
