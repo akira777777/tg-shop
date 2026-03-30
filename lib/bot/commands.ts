@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { orders, orderItems, products, users, messages } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
 import { ADMIN_IDS } from './relay';
+import { notifyOrderStatusChanged } from './notifications';
 
 const MINI_APP_URL = process.env.TELEGRAM_MINI_APP_URL!;
 
@@ -17,15 +18,6 @@ const STATUS_EMOJI: Record<string, string> = {
 };
 
 const VALID_STATUSES = Object.keys(STATUS_EMOJI);
-
-// Messages sent to users when admin updates their order status
-const USER_STATUS_MESSAGES: Partial<Record<string, string>> = {
-  processing: '⚙️ Ваш заказ принят в обработку.',
-  shipped: '🚚 Ваш заказ отправлен!',
-  delivered: '📦 Ваш заказ доставлен! Спасибо за покупку.',
-  cancelled: '❌ Ваш заказ отменён. Обратитесь к менеджеру для уточнений.',
-  paid: '✅ Оплата подтверждена. Ваш заказ обрабатывается.',
-};
 
 export function registerCommands(bot: Bot<Context>): void {
   // /start
@@ -302,17 +294,8 @@ export function registerCommands(bot: Bot<Context>): void {
       { parse_mode: 'Markdown' }
     );
 
-    const userMsg = USER_STATUS_MESSAGES[newStatus];
-    if (userMsg && updated.userId) {
-      try {
-        await ctx.api.sendMessage(
-          updated.userId,
-          `${userMsg}\n\n*Заказ #${orderId}*`,
-          { parse_mode: 'Markdown' }
-        );
-      } catch (err) {
-        console.error(`[status] Failed to notify user ${updated.userId}:`, err);
-      }
+    if (updated.userId) {
+      await notifyOrderStatusChanged(updated.userId, orderId, newStatus);
     }
   });
 }
