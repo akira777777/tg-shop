@@ -33,6 +33,7 @@ export const orders = pgTable('orders', {
   // pending | awaiting_payment | paid | processing | shipped | delivered | cancelled
   status: text('status').notNull().default('pending'),
   totalUsdt: numeric('total_usdt', { precision: 18, scale: 6 }).notNull(),
+  paymentMethod: text('payment_method').notNull().default('trc20'), // 'ton' | 'trc20'
   paymentAddress: text('payment_address').notNull(),
   paymentAmountTon: numeric('payment_amount_ton', { precision: 18, scale: 9 }),
   txHash: text('tx_hash'),
