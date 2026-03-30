@@ -4,6 +4,7 @@ import { eq, desc } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { acquireAddress } from '@/lib/tron/pool';
+import { notifyNewOrder } from '@/lib/bot/notifications';
 
 const CreateOrderSchema = z.object({
   userId: z.number().int(),
@@ -115,6 +116,16 @@ export async function POST(req: NextRequest): Promise<Response> {
         ...item,
       }))
     );
+
+    // Fire-and-forget: notification failure must not block the order response
+    notifyNewOrder({
+      orderId: newOrder.id,
+      userId,
+      totalUsdt: totalUsdt.toFixed(6),
+      itemCount: resolvedItems.length,
+      username,
+      firstName,
+    }).catch((err) => console.error('[notify] New order notification failed:', err));
 
     return NextResponse.json({
       orderId: newOrder.id,

@@ -2,6 +2,7 @@ import { db } from '@/lib/db';
 import { suggestions, users } from '@/lib/db/schema';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { notifyNewSuggestion } from '@/lib/bot/notifications';
 
 const SuggestionSchema = z.object({
   userId: z.number().int(),
@@ -33,6 +34,9 @@ export async function POST(req: NextRequest): Promise<Response> {
       .onConflictDoNothing();
 
     await db.insert(suggestions).values({ userId, productName, description });
+
+    notifyNewSuggestion({ userId, productName, description, username, firstName })
+      .catch((err) => console.error('[notify] Suggestion notification failed:', err));
 
     return NextResponse.json({ success: true });
   } catch (err) {
