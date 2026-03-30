@@ -1,47 +1,40 @@
 import { Bot, Context } from 'grammy';
-import { redis } from '@/lib/redis';
 import { db } from '@/lib/db';
 import { messages, users } from '@/lib/db/schema';
 
-// Comma-separated admin Telegram user IDs, e.g. "123456,789012"
-const ADMIN_IDS: number[] = (process.env.ADMIN_CHAT_IDS ?? '')
+export const ADMIN_IDS: number[] = (process.env.ADMIN_CHAT_IDS ?? '')
   .split(',')
   .map((s) => parseInt(s.trim(), 10))
   .filter((n) => !isNaN(n));
 
-const RELAY_TTL = 60 * 60 * 24 * 7; // 7 days
+// User ID is embedded at the end of the forwarded message for reply routing.
+// Plain-text format, no special chars — safe for any Markdown parser.
+const USER_ID_TAG = (userId: number) => `\n[uid:${userId}]`;
+const USER_ID_PATTERN = /\[uid:(\d+)\]/;
 
-/**
- * Registers relay handlers on the bot:
- *  - User DM (non-admin) → forwarded anonymously to all admins via DM
- *  - Admin DM reply → forwarded back to the original user as "Manager:"
- */
 export function registerRelayHandlers(bot: Bot<Context>): void {
-  // USER → ADMIN DMs
+  // USER → ADMIN: forward any private text from non-admins
   bot.on('message:text', async (ctx) => {
     if (ctx.chat.type !== 'private') return;
-
     const user = ctx.from;
-    if (!user) return;
-
-    // Don't relay admin messages to other admins
-    if (ADMIN_IDS.includes(user.id)) return;
+    if (!user || ADMIN_IDS.includes(user.id)) return;
 
     await db
       .insert(users)
       .values({ telegramId: user.id, username: user.username, firstName: user.first_name })
       .onConflictDoNothing();
 
+    const name = user.username ? `@${user.username}` : escapeMarkdown(user.first_name);
     const text =
-      `📨 *Message from User #${user.id}* (${escapeMarkdown(user.first_name)}):\n\n` +
-      `${escapeMarkdown(ctx.message.text)}\n\n` +
-      `_Reply to this message to respond anonymously._`;
+      `📨 *Сообщение от пользователя* (${name}):\n\n` +
+      `${escapeMarkdown(ctx.message.text)}` +
+      USER_ID_TAG(user.id);
 
-    // Forward to every admin — store each sent msg ID → user ID for reply routing
     for (const adminId of ADMIN_IDS) {
       try {
-        const sent = await ctx.api.sendMessage(adminId, text, { parse_mode: 'Markdown' });
-        await redis.set(`relay:${sent.message_id}`, user.id, { ex: RELAY_TTL });
+        await ctx.api.sendMessage(adminId, text, {
+          parse_mode: 'Markdown',
+        });
       } catch (err) {
         console.error(`[relay] Could not reach admin ${adminId}:`, err);
       }
@@ -56,30 +49,30 @@ export function registerRelayHandlers(bot: Bot<Context>): void {
     } catch (err) {
       console.error('[relay] Failed to save message to DB:', err);
     }
+
+    await ctx.reply('✅ Ваше сообщение отправлено менеджеру. Ожидайте ответа.');
   });
 
-  // ADMIN DM reply → USER
+  // ADMIN reply → USER: reply to a forwarded message to respond anonymously
   bot.on('message:text', async (ctx) => {
     if (ctx.chat.type !== 'private') return;
     if (!ADMIN_IDS.includes(ctx.from?.id ?? 0)) return;
     if (!ctx.message.reply_to_message) return;
 
-    const originalMsgId = ctx.message.reply_to_message.message_id;
-    let targetUserId: number | null = null;
-    try {
-      targetUserId = await redis.get<number>(`relay:${originalMsgId}`);
-    } catch (err) {
-      console.error('[relay] Redis lookup failed:', err);
-      return;
-    }
-    if (!targetUserId) return;
+    const quoted = ctx.message.reply_to_message;
+    const quotedText = quoted.text ?? quoted.caption ?? '';
+    const match = quotedText.match(USER_ID_PATTERN);
+    if (!match) return;
+
+    const targetUserId = parseInt(match[1], 10);
 
     try {
       await ctx.api.sendMessage(
         targetUserId,
-        `💬 *Manager:*\n\n${escapeMarkdown(ctx.message.text)}`,
+        `💬 *Менеджер:*\n\n${escapeMarkdown(ctx.message.text)}`,
         { parse_mode: 'Markdown' }
       );
+      await ctx.reply('✅ Ответ отправлен пользователю.');
       await db.insert(messages).values({
         userId: targetUserId,
         direction: 'admin_to_user',
@@ -87,6 +80,7 @@ export function registerRelayHandlers(bot: Bot<Context>): void {
       });
     } catch (err) {
       console.error('[relay] Failed to send reply to user:', err);
+      await ctx.reply('❌ Не удалось доставить сообщение пользователю.');
     }
   });
 }
