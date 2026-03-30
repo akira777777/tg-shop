@@ -1,0 +1,40 @@
+import { redis } from '@/lib/redis';
+
+const CACHE_KEY = 'ton:usd_price';
+const CACHE_TTL = 300; // 5 minutes
+
+/** Fetches TON/USD price from CoinGecko, cached in Redis for 5 min. */
+export async function getTonUsdPrice(): Promise<number> {
+  const cached = await redis.get<string>(CACHE_KEY);
+  if (cached) return parseFloat(cached);
+
+  const res = await fetch(
+    'https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd',
+    { cache: 'no-store' }
+  );
+  if (!res.ok) throw new Error(`CoinGecko error: ${res.status}`);
+
+  const data = (await res.json()) as { 'the-open-network': { usd: number } };
+  const price = data['the-open-network'].usd;
+
+  await redis.set(CACHE_KEY, price.toString(), { ex: CACHE_TTL });
+  return price;
+}
+
+/**
+ * Converts a USDT amount to TON, rounded up to 2 decimal places.
+ * Always rounds up to avoid underpayment.
+ */
+export function usdtToTon(usdt: number, tonUsdPrice: number): number {
+  return Math.ceil((usdt / tonUsdPrice) * 100) / 100;
+}
+
+/** Payment comment embedded in every TON transfer for order routing. */
+export function orderComment(orderId: number): string {
+  return `ORDER-${orderId}`;
+}
+
+/** TON amount in nanotons (1 TON = 1_000_000_000 nanoton). */
+export function toNanoton(ton: number): bigint {
+  return BigInt(Math.round(ton * 1_000_000_000));
+}

@@ -34,6 +34,7 @@ export const orders = pgTable('orders', {
   status: text('status').notNull().default('pending'),
   totalUsdt: numeric('total_usdt', { precision: 18, scale: 6 }).notNull(),
   paymentAddress: text('payment_address').notNull(),
+  paymentAmountTon: numeric('payment_amount_ton', { precision: 18, scale: 9 }),
   txHash: text('tx_hash'),
   createdAt: timestamp('created_at').defaultNow(),
   paidAt: timestamp('paid_at'),
