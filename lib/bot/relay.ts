@@ -1,19 +1,19 @@
-import { Bot, Context } from 'grammy';
+import { Bot, Context, InlineKeyboard } from 'grammy';
 import { db } from '@/lib/db';
 import { messages, users } from '@/lib/db/schema';
+import { redis } from '@/lib/redis';
+import { eq } from 'drizzle-orm';
 
 export const ADMIN_IDS: number[] = (process.env.ADMIN_CHAT_IDS ?? '')
   .split(',')
   .map((s) => parseInt(s.trim(), 10))
   .filter((n) => !isNaN(n));
 
-// User ID is embedded at the end of the forwarded message for reply routing.
-// Plain-text format, no special chars — safe for any Markdown parser.
-const USER_ID_TAG = (userId: number) => `\n[uid:${userId}]`;
-const USER_ID_PATTERN = /\[uid:(\d+)\]/;
+// Redis key for pending admin reply state (TTL 10 min)
+const pendingKey = (adminId: number) => `pending_reply:${adminId}`;
 
 export function registerRelayHandlers(bot: Bot<Context>): void {
-  // USER → ADMIN: forward any private text from non-admins
+  // USER → ADMIN: forward private text from non-admins
   bot.on('message:text', async (ctx) => {
     if (ctx.chat.type !== 'private') return;
     const user = ctx.from;
@@ -24,16 +24,23 @@ export function registerRelayHandlers(bot: Bot<Context>): void {
       .values({ telegramId: user.id, username: user.username, firstName: user.first_name })
       .onConflictDoNothing();
 
-    const name = user.username ? `@${user.username}` : escapeMarkdown(user.first_name);
+    const userLabel = user.username ? `@${user.username}` : user.first_name;
+
+    // callback_data limit is 64 bytes — store only userId, look up label on click
+    const keyboard = new InlineKeyboard().text(
+      `💬 Ответить`,
+      `reply_to:${user.id}`
+    );
+
     const text =
-      `📨 *Сообщение от пользователя* (${name}):\n\n` +
-      `${escapeMarkdown(ctx.message.text)}` +
-      USER_ID_TAG(user.id);
+      `📨 *Сообщение от ${escapeMarkdown(userLabel)}*\n\n` +
+      escapeMarkdown(ctx.message.text);
 
     for (const adminId of ADMIN_IDS) {
       try {
         await ctx.api.sendMessage(adminId, text, {
           parse_mode: 'Markdown',
+          reply_markup: keyboard,
         });
       } catch (err) {
         console.error(`[relay] Could not reach admin ${adminId}:`, err);
@@ -53,28 +60,76 @@ export function registerRelayHandlers(bot: Bot<Context>): void {
     await ctx.reply('✅ Ваше сообщение отправлено менеджеру. Ожидайте ответа.');
   });
 
-  // ADMIN reply → USER: reply to a forwarded message to respond anonymously
+  // ADMIN clicks "Ответить" → save pending state, prompt for reply text
+  bot.callbackQuery(/^reply_to:(\d+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    if (!ADMIN_IDS.includes(ctx.from.id)) return;
+
+    const userId = parseInt(ctx.match![1], 10);
+
+    // Look up user label from DB
+    const [userRow] = await db
+      .select({ username: users.username, firstName: users.firstName })
+      .from(users)
+      .where(eq(users.telegramId, userId))
+      .limit(1);
+
+    const userLabel = userRow?.username
+      ? `@${userRow.username}`
+      : (userRow?.firstName ?? `#${userId}`);
+
+    // Persist pending state: { userId, userLabel }
+    await redis.set(
+      pendingKey(ctx.from.id),
+      JSON.stringify({ userId, userLabel }),
+      { ex: 600 }
+    );
+
+    await ctx.reply(
+      `✏️ Напишите ответ для *${escapeMarkdown(userLabel)}*\n` +
+      `_Он придёт пользователю анонимно от имени бота._\n\n` +
+      `Отправьте /cancel чтобы отменить.`,
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  // ADMIN /cancel → clear pending reply state
+  bot.command('cancel', async (ctx) => {
+    if (ctx.chat.type !== 'private') return;
+    if (!ADMIN_IDS.includes(ctx.from?.id ?? 0)) return;
+
+    const deleted = await redis.del(pendingKey(ctx.from!.id));
+    await ctx.reply(deleted ? '❌ Ответ отменён.' : 'Нет активного режима ответа.');
+  });
+
+  // ADMIN sends text → if pending reply, forward to user
   bot.on('message:text', async (ctx) => {
     if (ctx.chat.type !== 'private') return;
     if (!ADMIN_IDS.includes(ctx.from?.id ?? 0)) return;
-    if (!ctx.message.reply_to_message) return;
 
-    const quoted = ctx.message.reply_to_message;
-    const quotedText = quoted.text ?? quoted.caption ?? '';
-    const match = quotedText.match(USER_ID_PATTERN);
-    if (!match) return;
+    const raw = await redis.get<string>(pendingKey(ctx.from!.id));
+    if (!raw) return;
 
-    const targetUserId = parseInt(match[1], 10);
+    let pending: { userId: number; userLabel: string };
+    try {
+      pending = typeof raw === 'string' ? JSON.parse(raw) : (raw as typeof pending);
+    } catch {
+      await redis.del(pendingKey(ctx.from!.id));
+      return;
+    }
+
+    await redis.del(pendingKey(ctx.from!.id));
 
     try {
       await ctx.api.sendMessage(
-        targetUserId,
+        pending.userId,
         `💬 *Менеджер:*\n\n${escapeMarkdown(ctx.message.text)}`,
         { parse_mode: 'Markdown' }
       );
-      await ctx.reply('✅ Ответ отправлен пользователю.');
+      await ctx.reply(`✅ Ответ отправлен — ${escapeMarkdown(pending.userLabel)}.`);
+
       await db.insert(messages).values({
-        userId: targetUserId,
+        userId: pending.userId,
         direction: 'admin_to_user',
         content: ctx.message.text,
       });

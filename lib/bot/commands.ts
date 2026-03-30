@@ -133,35 +133,52 @@ export function registerCommands(bot: Bot<Context>): void {
     await ctx.reply('Есть идея для товара? Заполните форму:', { reply_markup: keyboard });
   });
 
-  // Admin: Recent dialogs
+  // Admin: Recent dialogs with per-user reply buttons
   bot.callbackQuery('admin_dialogs', async (ctx) => {
     await ctx.answerCallbackQuery();
     if (!ADMIN_IDS.includes(ctx.from.id)) return;
 
     const recent = await db
-      .select()
+      .select({
+        userId: messages.userId,
+        content: messages.content,
+        createdAt: messages.createdAt,
+        username: users.username,
+        firstName: users.firstName,
+      })
       .from(messages)
+      .leftJoin(users, eq(messages.userId, users.telegramId))
       .where(eq(messages.direction, 'user_to_admin'))
       .orderBy(desc(messages.createdAt))
-      .limit(10);
+      .limit(20);
 
     if (recent.length === 0) {
       await ctx.reply('📭 Сообщений от пользователей пока нет.');
       return;
     }
 
+    // Deduplicate: one entry per user (most recent message)
     const seen = new Set<number>();
-    const lines: string[] = [];
+    const uniqueUsers: typeof recent = [];
     for (const m of recent) {
       if (!m.userId || seen.has(m.userId)) continue;
       seen.add(m.userId);
-      const preview = m.content.slice(0, 60).replace(/\n/g, ' ');
-      lines.push(`• User #${m.userId}: _${preview}${m.content.length > 60 ? '…' : ''}_`);
+      uniqueUsers.push(m);
+    }
+
+    const keyboard = new InlineKeyboard();
+    const lines: string[] = [];
+
+    for (const m of uniqueUsers) {
+      const userLabel = m.username ? `@${m.username}` : (m.firstName ?? `#${m.userId}`);
+      const preview = m.content.slice(0, 50).replace(/\n/g, ' ');
+      lines.push(`• *${userLabel}:* _${preview}${m.content.length > 50 ? '…' : ''}_`);
+      keyboard.text(`💬 Ответить ${userLabel}`, `reply_to:${m.userId}`).row();
     }
 
     await ctx.reply(
-      `💬 *Последние диалоги:*\n\n${lines.join('\n')}\n\n_Переслать сообщение придёт автоматически при новом сообщении. Ответьте через Reply._`,
-      { parse_mode: 'Markdown' }
+      `💬 *Последние диалоги:*\n\n${lines.join('\n')}`,
+      { parse_mode: 'Markdown', reply_markup: keyboard }
     );
   });
 

@@ -5,6 +5,12 @@ import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
 import { getTelegramUser } from '@/lib/telegram';
 
+interface OrderItem {
+  name: string;
+  quantity: number;
+  priceUsdt: string;
+}
+
 interface Order {
   id: number;
   status: string;
@@ -13,6 +19,7 @@ interface Order {
   txHash: string | null;
   createdAt: string;
   paidAt: string | null;
+  items: OrderItem[];
 }
 
 const STATUS_COLOR: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
@@ -98,9 +105,18 @@ export default function OrdersPage() {
                 </Badge>
               </div>
               <div className="flex justify-between text-sm text-muted-foreground">
-                <span>${order.totalUsdt} USDT</span>
+                <span>${parseFloat(order.totalUsdt).toFixed(2)} USDT</span>
                 <span>{new Date(order.createdAt).toLocaleDateString()}</span>
               </div>
+              {order.items && order.items.length > 0 && (
+                <div className="space-y-0.5 pt-1">
+                  {order.items.map((item, i) => (
+                    <p key={i} className="text-xs text-muted-foreground">
+                      {item.name} × {item.quantity} — ${parseFloat(item.priceUsdt).toFixed(2)} USDT
+                    </p>
+                  ))}
+                </div>
+              )}
               {order.txHash && (
                 <p className="text-xs font-mono text-muted-foreground truncate">
                   TX: {order.txHash}

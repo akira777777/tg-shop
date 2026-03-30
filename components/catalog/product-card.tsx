@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useCart } from '@/lib/cart-store';
@@ -36,12 +37,15 @@ export function ProductCard({ product }: { product: Product }) {
     <Link href={`/product/${product.id}`}>
       <Card className="overflow-hidden hover:border-primary/50 transition-colors cursor-pointer h-full">
         {product.imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={product.imageUrl}
-            alt={product.name}
-            className="w-full aspect-square object-cover"
-          />
+          <div className="relative w-full aspect-square">
+            <Image
+              src={product.imageUrl}
+              alt={product.name}
+              fill
+              className="object-cover"
+              unoptimized
+            />
+          </div>
         ) : (
           <div className="w-full aspect-square bg-muted flex items-center justify-center text-3xl">
             🛍️

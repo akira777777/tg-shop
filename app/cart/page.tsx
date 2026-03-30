@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { useCart } from '@/lib/cart-store';
 import { Separator } from '@/components/ui/separator';
 import { getTelegramUser } from '@/lib/telegram';
@@ -70,10 +71,9 @@ export default function CartPage() {
       <div className="flex-1 divide-y">
         {items.map((item) => (
           <div key={item.productId} className="flex items-center gap-3 px-4 py-3">
-            <div className="w-12 h-12 rounded-md bg-muted flex items-center justify-center text-xl shrink-0">
+            <div className="relative w-12 h-12 rounded-md bg-muted flex items-center justify-center text-xl shrink-0 overflow-hidden">
               {item.imageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover rounded-md" />
+                <Image src={item.imageUrl} alt={item.name} fill className="object-cover" unoptimized />
               ) : '🛍️'}
             </div>
             <div className="flex-1 min-w-0">

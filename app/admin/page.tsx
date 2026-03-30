@@ -74,6 +74,8 @@ export default function AdminPage() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newProduct, setNewProduct] = useState(EMPTY_PRODUCT);
   const [addingProduct, setAddingProduct] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<AdminProduct | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   // Suggestions
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -161,6 +163,33 @@ export default function AdminPage() {
     }
   };
 
+  const saveEditProduct = async () => {
+    if (!adminId || !editingProduct) return;
+    setSavingEdit(true);
+    try {
+      const res = await fetch(`/api/admin/products/${editingProduct.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          adminId,
+          name: editingProduct.name,
+          description: editingProduct.description ?? '',
+          priceUsdt: editingProduct.priceUsdt,
+          category: editingProduct.category,
+          imageUrl: editingProduct.imageUrl ?? '',
+          stock: editingProduct.stock,
+        }),
+      });
+      if (res.ok) {
+        const updated: AdminProduct = await res.json();
+        setProducts((prev) => prev.map((p) => p.id === updated.id ? updated : p));
+        setEditingProduct(null);
+      }
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   const createProduct = async () => {
     if (!adminId || !newProduct.name || !newProduct.priceUsdt) return;
     setAddingProduct(true);
@@ -242,7 +271,7 @@ export default function AdminPage() {
                       </Badge>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      User #{order.userId} · ${order.totalUsdt} USDT ·{' '}
+                      User #{order.userId} · ${parseFloat(order.totalUsdt).toFixed(2)} USDT ·{' '}
                       {new Date(order.createdAt).toLocaleDateString('ru-RU')}
                     </p>
                     {order.txHash && (
@@ -356,25 +385,87 @@ export default function AdminPage() {
                     key={product.id}
                     className={`border rounded-lg p-3 space-y-1 transition-opacity ${!product.active ? 'opacity-50' : ''}`}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">{product.name}</span>
-                      <span className="text-xs font-mono text-muted-foreground">
-                        ${product.priceUsdt}
-                      </span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {product.category} · В наличии: {product.stock}
-                    </p>
-                    <div className="flex justify-end pt-1">
-                      <Button
-                        size="sm"
-                        variant={product.active ? 'destructive' : 'outline'}
-                        className="text-xs"
-                        onClick={() => toggleProduct(product.id, !product.active)}
-                      >
-                        {product.active ? 'Деактивировать' : 'Активировать'}
-                      </Button>
-                    </div>
+                    {editingProduct?.id === product.id ? (
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium">Редактировать товар</p>
+                        <Input
+                          placeholder="Название *"
+                          value={editingProduct.name}
+                          onChange={(e) => setEditingProduct((p) => p ? { ...p, name: e.target.value } : p)}
+                          className="text-sm"
+                        />
+                        <Input
+                          placeholder="Категория"
+                          value={editingProduct.category}
+                          onChange={(e) => setEditingProduct((p) => p ? { ...p, category: e.target.value } : p)}
+                          className="text-sm"
+                        />
+                        <Input
+                          placeholder="Цена USDT *"
+                          value={editingProduct.priceUsdt}
+                          onChange={(e) => setEditingProduct((p) => p ? { ...p, priceUsdt: e.target.value } : p)}
+                          className="text-sm"
+                        />
+                        <Input
+                          placeholder="Количество"
+                          type="number"
+                          value={editingProduct.stock}
+                          onChange={(e) => setEditingProduct((p) => p ? { ...p, stock: parseInt(e.target.value, 10) || 0 } : p)}
+                          className="text-sm"
+                        />
+                        <Input
+                          placeholder="URL изображения"
+                          value={editingProduct.imageUrl ?? ''}
+                          onChange={(e) => setEditingProduct((p) => p ? { ...p, imageUrl: e.target.value } : p)}
+                          className="text-sm"
+                        />
+                        <Textarea
+                          placeholder="Описание"
+                          value={editingProduct.description ?? ''}
+                          onChange={(e) => setEditingProduct((p) => p ? { ...p, description: e.target.value } : p)}
+                          className="text-sm"
+                          rows={2}
+                        />
+                        <div className="flex gap-2">
+                          <Button size="sm" className="flex-1" disabled={savingEdit} onClick={saveEditProduct}>
+                            {savingEdit ? 'Сохранение…' : 'Сохранить'}
+                          </Button>
+                          <Button size="sm" variant="outline" className="flex-1" onClick={() => setEditingProduct(null)}>
+                            Отмена
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium">{product.name}</span>
+                          <span className="text-xs font-mono text-muted-foreground">
+                            ${parseFloat(product.priceUsdt).toFixed(2)}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {product.category} · В наличии: {product.stock}
+                        </p>
+                        <div className="flex gap-2 justify-end pt-1">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-xs"
+                            onClick={() => setEditingProduct(product)}
+                          >
+                            Редактировать
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={product.active ? 'destructive' : 'outline'}
+                            className="text-xs"
+                            onClick={() => toggleProduct(product.id, !product.active)}
+                          >
+                            {product.active ? 'Деактивировать' : 'Активировать'}
+                          </Button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>

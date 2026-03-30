@@ -88,7 +88,7 @@ function CheckoutInner() {
             <div className="bg-muted/50 rounded-xl p-4 space-y-3">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Amount to send</span>
-                <span className="font-bold text-primary">{total} USDT</span>
+                <span className="font-bold text-primary">{parseFloat(total).toFixed(2)} USDT</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Network</span>
@@ -113,7 +113,7 @@ function CheckoutInner() {
 
             <div className="bg-yellow-900/30 border border-yellow-700/40 rounded-lg p-3">
               <p className="text-xs text-yellow-200/80">
-                ⚠️ Send <strong>exactly {total} USDT</strong> on the <strong>Tron (TRC20)</strong> network to this address.
+                ⚠️ Send <strong>exactly {parseFloat(total).toFixed(2)} USDT</strong> on the <strong>Tron (TRC20)</strong> network to this address.
                 Sending other tokens or on a different network will result in permanent loss.
               </p>
             </div>

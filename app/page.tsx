@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ProductCard } from '@/components/catalog/product-card';
 import { CartFab } from '@/components/catalog/cart-fab';
+import { Input } from '@/components/ui/input';
 
 interface Product {
   id: number;
@@ -19,6 +20,7 @@ export default function CatalogPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('All');
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     fetch('/api/products')
@@ -29,8 +31,11 @@ export default function CatalogPage() {
   }, []);
 
   const categories = ['All', ...Array.from(new Set(products.map((p) => p.category)))];
-  const filtered =
-    activeTab === 'All' ? products : products.filter((p) => p.category === activeTab);
+  const filtered = products.filter((p) => {
+    const matchCategory = activeTab === 'All' || p.category === activeTab;
+    const matchSearch = p.name.toLowerCase().includes(search.toLowerCase());
+    return matchCategory && matchSearch;
+  });
 
   if (loading) {
     return (
@@ -42,8 +47,14 @@ export default function CatalogPage() {
 
   return (
     <div className="pb-24">
-      <header className="sticky top-0 z-10 bg-background/90 backdrop-blur border-b px-4 py-3">
+      <header className="sticky top-0 z-10 bg-background/90 backdrop-blur border-b px-4 py-3 space-y-2">
         <h1 className="text-lg font-semibold tracking-tight">🛍️ Catalog</h1>
+        <Input
+          placeholder="Поиск товаров…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="h-8 text-sm"
+        />
       </header>
 
       <div className="px-4 pt-4">

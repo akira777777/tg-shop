@@ -1,6 +1,6 @@
 import { db } from '@/lib/db';
 import { orders, orderItems, products, users } from '@/lib/db/schema';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, sql } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { acquireAddress } from '@/lib/tron/pool';
@@ -20,7 +20,7 @@ const CreateOrderSchema = z.object({
     .min(1),
 });
 
-// GET /api/orders?userId=123  — fetch orders for a user
+// GET /api/orders?userId=123  — fetch orders for a user, including items
 export async function GET(req: NextRequest): Promise<Response> {
   const userId = parseInt(req.nextUrl.searchParams.get('userId') ?? '', 10);
   if (isNaN(userId)) {
@@ -33,7 +33,23 @@ export async function GET(req: NextRequest): Promise<Response> {
       .from(orders)
       .where(eq(orders.userId, userId))
       .orderBy(desc(orders.createdAt));
-    return NextResponse.json(rows);
+
+    const enriched = await Promise.all(
+      rows.map(async (order) => {
+        const items = await db
+          .select({
+            name: products.name,
+            quantity: orderItems.quantity,
+            priceUsdt: orderItems.priceUsdt,
+          })
+          .from(orderItems)
+          .innerJoin(products, eq(orderItems.productId, products.id))
+          .where(eq(orderItems.orderId, order.id));
+        return { ...order, items };
+      })
+    );
+
+    return NextResponse.json(enriched);
   } catch (err) {
     console.error('[GET /api/orders]', err);
     return NextResponse.json({ error: 'Failed to load orders' }, { status: 500 });
@@ -116,6 +132,14 @@ export async function POST(req: NextRequest): Promise<Response> {
         ...item,
       }))
     );
+
+    // Decrement stock for each ordered product
+    for (const item of resolvedItems) {
+      await db
+        .update(products)
+        .set({ stock: sql`${products.stock} - ${item.quantity}` })
+        .where(eq(products.id, item.productId));
+    }
 
     // Fire-and-forget: notification failure must not block the order response
     notifyNewOrder({
