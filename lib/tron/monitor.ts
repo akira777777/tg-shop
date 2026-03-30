@@ -2,7 +2,6 @@ import { db } from '@/lib/db';
 import { orders } from '@/lib/db/schema';
 import { eq, and, lt } from 'drizzle-orm';
 import { notifyPaymentConfirmed } from '@/lib/bot/notifications';
-import { releaseAddress } from './pool';
 
 const USDT_CONTRACT =
   process.env.TRON_USDT_CONTRACT ?? 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
@@ -68,9 +67,6 @@ export async function checkPendingPayments(): Promise<void> {
           .set({ status: 'paid', txHash: match.transaction_id, paidAt: new Date() })
           .where(eq(orders.id, order.id));
 
-        // Return address to the pool after payment
-        await releaseAddress(order.paymentAddress);
-
         if (order.userId) {
           await notifyPaymentConfirmed(order.userId, order.id, match.transaction_id);
         }
@@ -99,7 +95,5 @@ async function expireStaleOrders(): Promise<void> {
       .update(orders)
       .set({ status: 'cancelled' })
       .where(eq(orders.id, order.id));
-
-    await releaseAddress(order.paymentAddress);
   }
 }

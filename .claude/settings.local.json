@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "mcp__MCP_DOCKER__mcp-find"
+      "mcp__MCP_DOCKER__mcp-find",
+      "Bash(ls -la *.env* .env*)"
     ]
   }
 }

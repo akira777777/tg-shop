@@ -3,7 +3,6 @@ import { orders, orderItems, products, users } from '@/lib/db/schema';
 import { eq, desc, sql } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { acquireAddress } from '@/lib/tron/pool';
 import { notifyNewOrder } from '@/lib/bot/notifications';
 
 const CreateOrderSchema = z.object({
@@ -112,8 +111,10 @@ export async function POST(req: NextRequest): Promise<Response> {
       });
     }
 
-    // Acquire an address from the pool before creating the order
-    const paymentAddress = await acquireAddress();
+    const paymentAddress = process.env.TRON_WALLET_ADDRESS;
+    if (!paymentAddress) {
+      return NextResponse.json({ error: 'Payment address not configured' }, { status: 500 });
+    }
 
     const [newOrder] = await db
       .insert(orders)
