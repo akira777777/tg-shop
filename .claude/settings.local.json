@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "mcp__MCP_DOCKER__mcp-find",
-      "Bash(ls -la *.env* .env*)"
+      "Bash(ls -la *.env* .env*)",
+      "Bash(npx tsx:*)"
     ]
   }
 }
