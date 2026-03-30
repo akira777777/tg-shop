@@ -78,7 +78,7 @@ export default function CartPage() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium truncate">{item.name}</p>
-              <p className="text-xs text-muted-foreground">${item.priceUsdt} USDT each</p>
+              <p className="text-xs text-muted-foreground">${parseFloat(item.priceUsdt).toFixed(2)} USDT each</p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <button
@@ -99,7 +99,7 @@ export default function CartPage() {
         <Separator />
         <div className="flex justify-between text-base font-semibold">
           <span>Total</span>
-          <span>${total().toFixed(6)} USDT</span>
+          <span>${total().toFixed(2)} USDT</span>
         </div>
         {error && <p className="text-destructive text-sm">{error}</p>}
         <button

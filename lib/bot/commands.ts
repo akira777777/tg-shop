@@ -227,7 +227,7 @@ export function registerCommands(bot: Bot<Context>): void {
       .innerJoin(products, eq(orderItems.productId, products.id))
       .where(eq(orderItems.orderId, orderId));
 
-    const itemLines = items.map((i) => `• ${i.name} × ${i.quantity} — $${i.price} USDT`);
+    const itemLines = items.map((i) => `• ${i.name} × ${i.quantity} — $${parseFloat(i.price).toFixed(2)} USDT`);
     const emoji = STATUS_EMOJI[order.status] ?? '❓';
     const date = order.createdAt ? order.createdAt.toLocaleDateString('ru-RU') : '—';
 

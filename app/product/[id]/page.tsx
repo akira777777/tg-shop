@@ -92,7 +92,7 @@ export default function ProductPage() {
         <div className="space-y-1">
           <Badge variant="secondary" className="text-xs">{product.category}</Badge>
           <h1 className="text-xl font-semibold leading-tight">{product.name}</h1>
-          <p className="text-2xl font-bold text-primary">${product.priceUsdt} USDT</p>
+          <p className="text-2xl font-bold text-primary">${parseFloat(product.priceUsdt).toFixed(2)} USDT</p>
         </div>
 
         {product.description && (
@@ -124,7 +124,7 @@ export default function ProductPage() {
             onClick={handleAdd}
             className="w-full bg-primary text-primary-foreground rounded-lg py-3 text-sm font-semibold hover:bg-primary/90 transition-colors"
           >
-            Add to cart — ${product.priceUsdt} USDT
+            Add to cart — ${parseFloat(product.priceUsdt).toFixed(2)} USDT
           </button>
         )}
       </div>

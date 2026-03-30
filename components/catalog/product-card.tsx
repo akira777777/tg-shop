@@ -49,7 +49,7 @@ export function ProductCard({ product }: { product: Product }) {
         )}
         <CardContent className="p-3 space-y-1.5">
           <p className="text-sm font-medium leading-tight line-clamp-2">{product.name}</p>
-          <p className="text-sm font-semibold text-primary">${product.priceUsdt} USDT</p>
+          <p className="text-sm font-semibold text-primary">${parseFloat(product.priceUsdt).toFixed(2)} USDT</p>
           {outOfStock ? (
             <Badge variant="secondary" className="text-xs">Out of stock</Badge>
           ) : (
