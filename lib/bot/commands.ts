@@ -17,6 +17,8 @@ const STATUS_EMOJI: Record<string, string> = {
 
 export function registerCommands(bot: Bot<Context>): void {
   bot.command('start', async (ctx) => {
+    if (ctx.chat.type !== 'private') return;
+
     const user = ctx.from;
     if (user) {
       await db
