@@ -42,16 +42,20 @@ export function registerRelayHandlers(bot: Bot<Context>): void {
       try {
         const sent = await ctx.api.sendMessage(adminId, text, { parse_mode: 'Markdown' });
         await redis.set(`relay:${sent.message_id}`, user.id, { ex: RELAY_TTL });
-      } catch {
-        console.error(`[relay] Could not reach admin ${adminId}`);
+      } catch (err) {
+        console.error(`[relay] Could not reach admin ${adminId}:`, err);
       }
     }
 
-    await db.insert(messages).values({
-      userId: user.id,
-      direction: 'user_to_admin',
-      content: ctx.message.text,
-    });
+    try {
+      await db.insert(messages).values({
+        userId: user.id,
+        direction: 'user_to_admin',
+        content: ctx.message.text,
+      });
+    } catch (err) {
+      console.error('[relay] Failed to save message to DB:', err);
+    }
   });
 
   // ADMIN DM reply → USER
@@ -61,20 +65,29 @@ export function registerRelayHandlers(bot: Bot<Context>): void {
     if (!ctx.message.reply_to_message) return;
 
     const originalMsgId = ctx.message.reply_to_message.message_id;
-    const targetUserId = await redis.get<number>(`relay:${originalMsgId}`);
+    let targetUserId: number | null = null;
+    try {
+      targetUserId = await redis.get<number>(`relay:${originalMsgId}`);
+    } catch (err) {
+      console.error('[relay] Redis lookup failed:', err);
+      return;
+    }
     if (!targetUserId) return;
 
-    await ctx.api.sendMessage(
-      targetUserId,
-      `💬 *Manager:*\n\n${escapeMarkdown(ctx.message.text)}`,
-      { parse_mode: 'Markdown' }
-    );
-
-    await db.insert(messages).values({
-      userId: targetUserId,
-      direction: 'admin_to_user',
-      content: ctx.message.text,
-    });
+    try {
+      await ctx.api.sendMessage(
+        targetUserId,
+        `💬 *Manager:*\n\n${escapeMarkdown(ctx.message.text)}`,
+        { parse_mode: 'Markdown' }
+      );
+      await db.insert(messages).values({
+        userId: targetUserId,
+        direction: 'admin_to_user',
+        content: ctx.message.text,
+      });
+    } catch (err) {
+      console.error('[relay] Failed to send reply to user:', err);
+    }
   });
 }
 
