@@ -62,7 +62,7 @@ export default function CartPage() {
   }
 
   return (
-    <div className="flex flex-col min-h-screen">
+    <div className="flex flex-col min-h-screen pb-20" style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}>
       <header className="sticky top-0 z-10 bg-background/90 backdrop-blur border-b px-4 py-3 flex items-center gap-3">
         <button onClick={() => router.back()} className="text-muted-foreground">←</button>
         <h1 className="text-lg font-semibold">Your Cart</h1>

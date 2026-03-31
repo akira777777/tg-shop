@@ -9,8 +9,11 @@ import { useEffect } from 'react';
 export function TelegramInit() {
   useEffect(() => {
     if (typeof window !== 'undefined' && window.Telegram?.WebApp) {
-      window.Telegram.WebApp.ready();
-      window.Telegram.WebApp.expand();
+      const twa = window.Telegram.WebApp;
+      twa.ready();
+      twa.expand();
+      // Hide Telegram's native bottom chrome (Bot API 8.0+)
+      twa.requestFullscreen?.();
     }
   }, []);
 

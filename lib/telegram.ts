@@ -46,6 +46,7 @@ declare global {
         ready: () => void;
         expand: () => void;
         close: () => void;
+        requestFullscreen?: () => void;
         initData: string;
         initDataUnsafe: {
           user?: { id: number; first_name: string; username?: string };

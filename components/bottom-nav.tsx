@@ -23,7 +23,10 @@ export function BottomNav() {
   }
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-20 bg-background/90 backdrop-blur border-t flex">
+    <nav
+      className="fixed bottom-0 left-0 right-0 z-20 bg-background/90 backdrop-blur border-t flex"
+      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+    >
       {NAV_ITEMS.map(({ href, label, icon }) => {
         const active = pathname === href;
         return (
