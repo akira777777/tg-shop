@@ -19,7 +19,7 @@ interface Product {
 export default function CatalogPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('All');
+  const [activeTab, setActiveTab] = useState('Все');
   const [search, setSearch] = useState('');
 
   useEffect(() => {
@@ -31,14 +31,14 @@ export default function CatalogPage() {
   }, []);
 
   const categories = useMemo(
-    () => ['All', ...Array.from(new Set(products.map((p) => p.category)))],
+    () => ['Все', ...Array.from(new Set(products.map((p) => p.category)))],
     [products]
   );
 
   const filtered = useMemo(
     () =>
       products.filter((p) => {
-        const matchCategory = activeTab === 'All' || p.category === activeTab;
+        const matchCategory = activeTab === 'Все' || p.category === activeTab;
         const matchSearch = p.name.toLowerCase().includes(search.toLowerCase());
         return matchCategory && matchSearch;
       }),
@@ -48,7 +48,7 @@ export default function CatalogPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <p className="text-muted-foreground animate-pulse">Loading catalog…</p>
+        <p className="text-muted-foreground animate-pulse">Загрузка каталога…</p>
       </div>
     );
   }
@@ -56,7 +56,7 @@ export default function CatalogPage() {
   return (
     <div className="pb-24">
       <header className="sticky top-0 z-10 bg-background/90 backdrop-blur border-b px-4 py-3 space-y-2">
-        <h1 className="text-lg font-semibold tracking-tight">🛍️ Catalog</h1>
+        <h1 className="text-lg font-semibold tracking-tight">🛍️ Каталог</h1>
         <Input
           placeholder="Поиск товаров…"
           value={search}
@@ -83,7 +83,7 @@ export default function CatalogPage() {
                 ))}
               </div>
               {filtered.length === 0 && (
-                <p className="text-center text-muted-foreground py-12">No products here yet.</p>
+                <p className="text-center text-muted-foreground py-12">Товаров пока нет.</p>
               )}
             </TabsContent>
           ))}

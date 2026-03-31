@@ -9,7 +9,7 @@ import { invalidateProductsCache } from '@/lib/products-cache';
 const CreateProductSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().max(1000).optional(),
-  priceUsdt: z.string().min(1),
+  priceUsdt: z.string().regex(/^\d+(\.\d{1,6})?$/, 'Некорректный формат цены USDT'),
   category: z.string().min(1).max(100).default('General'),
   imageUrl: z.string().optional(),
   stock: z.number().int().min(0).default(0),

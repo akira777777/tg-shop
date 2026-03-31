@@ -4,7 +4,7 @@ import { eq, and, lt, isNull } from 'drizzle-orm';
 import { notifyPaymentConfirmed, notifyOrderExpired } from '@/lib/bot/notifications';
 import { orderComment } from './price';
 
-const TON_WALLET = process.env.TON_WALLET_ADDRESS!;
+const TON_WALLET = process.env.TON_WALLET_ADDRESS;
 const TONCENTER_BASE = process.env.TONCENTER_API_URL ?? 'https://toncenter.com/api/v2';
 const ORDER_TTL_MINUTES = parseInt(process.env.ORDER_TTL_MINUTES ?? '60', 10);
 // Allow up to 1% underpayment to handle minor price drift
@@ -25,6 +25,11 @@ interface TonCenterTx {
  * Called by the Vercel Cron every minute.
  */
 export async function checkPendingPayments(): Promise<void> {
+  if (!TON_WALLET) {
+    console.error('[ton-monitor] TON_WALLET_ADDRESS is not set — skipping TON payment check');
+    return;
+  }
+
   await expireStaleOrders();
 
   const pending = await db
@@ -36,8 +41,8 @@ export async function checkPendingPayments(): Promise<void> {
 
   // One API call fetches recent txs for all pending orders
   const url = new URL(`${TONCENTER_BASE}/getTransactions`);
-  url.searchParams.set('address', TON_WALLET);
-  url.searchParams.set('limit', '50');
+  url.searchParams.set('address', TON_WALLET!);
+  url.searchParams.set('limit', '100');
   url.searchParams.set('archival', 'false');
 
   const headers: Record<string, string> = {};

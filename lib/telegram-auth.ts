@@ -43,6 +43,13 @@ export function verifyInitData(initData: string): TelegramUser | null {
       return null;
     }
 
+    // Reject initData older than 24 hours to prevent replay attacks
+    const authDateRaw = params.get('auth_date');
+    if (!authDateRaw) return null;
+    const authDate = parseInt(authDateRaw, 10);
+    const MAX_AGE_SECONDS = 24 * 60 * 60;
+    if (Date.now() / 1000 - authDate > MAX_AGE_SECONDS) return null;
+
     const userRaw = params.get('user');
     if (!userRaw) return null;
     return JSON.parse(userRaw) as TelegramUser;

@@ -37,7 +37,7 @@ export async function checkPendingPayments(): Promise<void> {
     try {
       const res = await fetch(
         `${TRONGRID_API}/v1/accounts/${order.paymentAddress}/transactions/trc20` +
-          `?contract_address=${USDT_CONTRACT}&limit=10&only_to=true`,
+          `?contract_address=${USDT_CONTRACT}&limit=50&only_to=true`,
         {
           headers: {
             'TRON-PRO-API-KEY': process.env.TRONGRID_API_KEY ?? '',
@@ -45,7 +45,10 @@ export async function checkPendingPayments(): Promise<void> {
         }
       );
 
-      if (!res.ok) continue;
+      if (!res.ok) {
+        console.error(`[tron-monitor] TronGrid error for order ${order.id}: ${res.status}`);
+        continue;
+      }
       const json = (await res.json()) as { data?: TronGridTx[] };
       const txs = json.data ?? [];
 
@@ -79,8 +82,8 @@ export async function checkPendingPayments(): Promise<void> {
           }
         }
       }
-    } catch {
-      console.error(`[tron-monitor] Failed to check order ${order.id}`);
+    } catch (err) {
+      console.error(`[tron-monitor] Failed to check order ${order.id}:`, err);
     }
   }
 }

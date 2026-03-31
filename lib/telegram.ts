@@ -3,7 +3,7 @@
 /**
  * Returns the Telegram WebApp user object, or null when opened outside Telegram.
  *
- * In development, if ALLOW_DEV_AUTH=true and VITE_DEV_TELEGRAM_USER_ID is set,
+ * In development, if NEXT_PUBLIC_ALLOW_DEV_AUTH=true and NEXT_PUBLIC_DEV_TELEGRAM_USER_ID is set,
  * returns a synthetic user so the Mini App works outside Telegram without a tunnel.
  */
 export function getTelegramUser() {

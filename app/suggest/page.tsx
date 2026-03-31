@@ -18,7 +18,7 @@ export default function SuggestPage() {
     e.preventDefault();
     const user = getTelegramUser();
     if (!user) {
-      setError('Open this in Telegram to submit a suggestion.');
+      setError('Откройте в Telegram, чтобы отправить предложение.');
       return;
     }
     setLoading(true);
@@ -36,14 +36,14 @@ export default function SuggestPage() {
 
       if (!res.ok) {
         const data = await res.json();
-        setError(data.error ?? 'Failed to submit');
+        setError(data.error ?? 'Не удалось отправить');
         return;
       }
 
       setSubmitted(true);
       hapticFeedback('notification');
     } catch {
-      setError('Network error. Please try again.');
+      setError('Ошибка соединения. Попробуйте ещё раз.');
     } finally {
       setLoading(false);
     }
@@ -53,12 +53,12 @@ export default function SuggestPage() {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen gap-4 px-6 text-center">
         <p className="text-5xl">🎉</p>
-        <h2 className="text-lg font-semibold">Thank you!</h2>
+        <h2 className="text-lg font-semibold">Спасибо!</h2>
         <p className="text-sm text-muted-foreground">
-          Your suggestion has been received. We&apos;ll review it soon.
+          Ваше предложение принято. Мы рассмотрим его в ближайшее время.
         </p>
         <button onClick={() => router.push('/')} className="text-primary text-sm underline">
-          Back to catalog
+          Вернуться в каталог
         </button>
       </div>
     );
@@ -68,27 +68,27 @@ export default function SuggestPage() {
     <div className="flex flex-col min-h-screen">
       <header className="sticky top-0 z-10 bg-background/90 backdrop-blur border-b px-4 py-3 flex items-center gap-3">
         <button onClick={() => router.back()} className="text-muted-foreground">←</button>
-        <h1 className="text-lg font-semibold">💡 Suggest a Product</h1>
+        <h1 className="text-lg font-semibold">💡 Предложить товар</h1>
       </header>
 
       <form onSubmit={handleSubmit} className="flex-1 px-4 py-6 space-y-5">
         <div className="space-y-2">
-          <label className="text-sm font-medium">Product name *</label>
+          <label className="text-sm font-medium">Название товара *</label>
           <Input
             value={productName}
             onChange={(e) => setProductName(e.target.value)}
-            placeholder="e.g. Wireless headphones"
+            placeholder="Например: Беспроводные наушники"
             required
             maxLength={200}
           />
         </div>
 
         <div className="space-y-2">
-          <label className="text-sm font-medium">Description <span className="text-muted-foreground">(optional)</span></label>
+          <label className="text-sm font-medium">Описание <span className="text-muted-foreground">(необязательно)</span></label>
           <Textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Tell us more about why you'd like this product…"
+            placeholder="Расскажите подробнее, зачем вам этот товар…"
             rows={4}
             maxLength={1000}
           />
@@ -101,7 +101,7 @@ export default function SuggestPage() {
           disabled={loading || !productName.trim()}
           className="w-full bg-primary text-primary-foreground rounded-lg py-3 text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
         >
-          {loading ? 'Submitting…' : 'Submit Suggestion'}
+          {loading ? 'Отправка…' : 'Предложить товар'}
         </button>
       </form>
     </div>

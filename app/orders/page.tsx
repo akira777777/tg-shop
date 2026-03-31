@@ -35,13 +35,13 @@ const STATUS_COLOR: Record<string, 'default' | 'secondary' | 'destructive' | 'ou
 };
 
 const STATUS_LABEL: Record<string, string> = {
-  pending: '🕐 Pending',
-  awaiting_payment: '💳 Awaiting Payment',
-  paid: '✅ Paid',
-  processing: '⚙️ Processing',
-  shipped: '🚚 Shipped',
-  delivered: '📦 Delivered',
-  cancelled: '❌ Cancelled',
+  pending: '🕐 Ожидает',
+  awaiting_payment: '💳 Ожидает оплату',
+  paid: '✅ Оплачен',
+  processing: '⚙️ В обработке',
+  shipped: '🚚 Отправлен',
+  delivered: '📦 Доставлен',
+  cancelled: '❌ Отменён',
 };
 
 export default function OrdersPage() {
@@ -65,7 +65,7 @@ export default function OrdersPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <p className="text-muted-foreground animate-pulse">Loading orders…</p>
+        <p className="text-muted-foreground animate-pulse">Загрузка заказов…</p>
       </div>
     );
   }
@@ -73,7 +73,7 @@ export default function OrdersPage() {
   if (!user) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <p className="text-muted-foreground">Open this in Telegram to see your orders.</p>
+        <p className="text-muted-foreground">Откройте в Telegram, чтобы увидеть заказы.</p>
       </div>
     );
   }
@@ -82,15 +82,15 @@ export default function OrdersPage() {
     <div className="flex flex-col min-h-screen">
       <header className="sticky top-0 z-10 bg-background/90 backdrop-blur border-b px-4 py-3 flex items-center gap-3">
         <button onClick={() => router.push('/')} className="text-muted-foreground">←</button>
-        <h1 className="text-lg font-semibold">My Orders</h1>
+        <h1 className="text-lg font-semibold">Мои заказы</h1>
       </header>
 
       {orders.length === 0 ? (
         <div className="flex flex-col items-center justify-center flex-1 gap-4">
           <p className="text-4xl">📦</p>
-          <p className="text-muted-foreground">No orders yet.</p>
+          <p className="text-muted-foreground">Заказов пока нет.</p>
           <button onClick={() => router.push('/')} className="text-primary text-sm underline">
-            Start shopping
+            Перейти в каталог
           </button>
         </div>
       ) : (
@@ -98,14 +98,14 @@ export default function OrdersPage() {
           {orders.map((order) => (
             <div key={order.id} className="px-4 py-4 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">Order #{order.id}</span>
+                <span className="text-sm font-medium">Заказ #{order.id}</span>
                 <Badge variant={STATUS_COLOR[order.status] ?? 'outline'} className="text-xs">
                   {STATUS_LABEL[order.status] ?? order.status}
                 </Badge>
               </div>
               <div className="flex justify-between text-sm text-muted-foreground">
                 <span>${parseFloat(order.totalUsdt).toFixed(2)} USDT</span>
-                <span>{new Date(order.createdAt).toLocaleDateString()}</span>
+                <span>{new Date(order.createdAt).toLocaleDateString('ru-RU')}</span>
               </div>
               {order.items && order.items.length > 0 && (
                 <div className="space-y-0.5 pt-1">
@@ -136,7 +136,7 @@ export default function OrdersPage() {
                   }}
                   className="text-xs text-primary underline"
                 >
-                  Show payment address
+                  Показать адрес оплаты
                 </button>
               )}
             </div>

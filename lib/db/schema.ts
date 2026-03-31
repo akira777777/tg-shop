@@ -41,12 +41,15 @@ export const orders = pgTable(
     paymentAmountTon: numeric('payment_amount_ton', { precision: 18, scale: 9 }),
     txHash: text('tx_hash'),
     createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()),
     paidAt: timestamp('paid_at'),
   },
   (t) => ({
     statusIdx: index('orders_status_idx').on(t.status),
     userIdIdx: index('orders_user_id_idx').on(t.userId),
     paymentMethodIdx: index('orders_payment_method_idx').on(t.paymentMethod),
+    // Composite index for cron monitor queries: status + payment_method + created_at
+    statusMethodIdx: index('orders_status_method_idx').on(t.status, t.paymentMethod),
   })
 );
 

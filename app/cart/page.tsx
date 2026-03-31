@@ -9,7 +9,7 @@ import { useState } from 'react';
 
 export default function CartPage() {
   const router = useRouter();
-  const { items, updateQty, removeItem, total, clear } = useCart();
+  const { items, updateQty, total, clear } = useCart();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'trc20' | 'ton'>('trc20');
@@ -17,7 +17,7 @@ export default function CartPage() {
   async function handleCheckout() {
     const user = getTelegramUser();
     if (!user) {
-      setError('Open this in Telegram to checkout.');
+      setError('Откройте в Telegram для оформления заказа.');
       return;
     }
     setLoading(true);
@@ -38,7 +38,7 @@ export default function CartPage() {
 
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error ?? 'Failed to create order');
+        setError(data.error ?? 'Не удалось создать заказ');
         return;
       }
 
@@ -53,7 +53,7 @@ export default function CartPage() {
       if (data.comment) checkoutParams.set('comment', data.comment);
       router.push(`/checkout?${checkoutParams.toString()}`);
     } catch {
-      setError('Network error. Please try again.');
+      setError('Ошибка соединения. Попробуйте ещё раз.');
     } finally {
       setLoading(false);
     }
@@ -63,9 +63,9 @@ export default function CartPage() {
     return (
       <div className="flex flex-col items-center justify-center h-screen gap-4">
         <p className="text-4xl">🛒</p>
-        <p className="text-muted-foreground">Your cart is empty.</p>
+        <p className="text-muted-foreground">Корзина пуста.</p>
         <button onClick={() => router.push('/')} className="text-primary text-sm underline">
-          Browse catalog
+          Перейти в каталог
         </button>
       </div>
     );
@@ -75,7 +75,7 @@ export default function CartPage() {
     <div className="flex flex-col min-h-screen pb-20" style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}>
       <header className="sticky top-0 z-10 bg-background/90 backdrop-blur border-b px-4 py-3 flex items-center gap-3">
         <button onClick={() => router.back()} className="text-muted-foreground">←</button>
-        <h1 className="text-lg font-semibold">Your Cart</h1>
+        <h1 className="text-lg font-semibold">Корзина</h1>
       </header>
 
       <div className="flex-1 divide-y">
@@ -88,7 +88,7 @@ export default function CartPage() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium truncate">{item.name}</p>
-              <p className="text-xs text-muted-foreground">${parseFloat(item.priceUsdt).toFixed(2)} USDT each</p>
+              <p className="text-xs text-muted-foreground">${parseFloat(item.priceUsdt).toFixed(2)} USDT / шт.</p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <button
@@ -108,7 +108,7 @@ export default function CartPage() {
       <div className="p-4 border-t space-y-3">
         <Separator />
         <div className="flex justify-between text-base font-semibold">
-          <span>Total</span>
+          <span>Итого</span>
           <span>${total().toFixed(2)} USDT</span>
         </div>
 
@@ -141,7 +141,7 @@ export default function CartPage() {
           disabled={loading}
           className="w-full bg-primary text-primary-foreground rounded-lg py-3 text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
         >
-          {loading ? 'Creating order…' : `Pay with ${paymentMethod === 'ton' ? 'TON' : 'USDT (TRC20)'}`}
+          {loading ? 'Создание заказа…' : `Оплатить через ${paymentMethod === 'ton' ? 'TON' : 'USDT (TRC20)'}`}
         </button>
       </div>
     </div>
