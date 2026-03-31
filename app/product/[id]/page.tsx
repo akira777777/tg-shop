@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Image from 'next/image';
 import { useParams, useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -27,12 +28,12 @@ export default function ProductPage() {
   const inCart = cartItems.find((i) => i.productId === Number(params.id));
 
   useEffect(() => {
-    fetch(`/api/products`)
-      .then((r) => r.json())
-      .then((all: Product[]) => {
-        const found = all.find((p) => p.id === Number(params.id));
-        setProduct(found ?? null);
+    fetch(`/api/products/${params.id}`)
+      .then(async (r) => {
+        if (r.status === 404) { setProduct(null); return; }
+        setProduct(await r.json());
       })
+      .catch(() => setProduct(null))
       .finally(() => setLoading(false));
   }, [params.id]);
 
@@ -76,12 +77,15 @@ export default function ProductPage() {
       </button>
 
       {product.imageUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={product.imageUrl}
-          alt={product.name}
-          className="w-full aspect-square object-cover"
-        />
+        <div className="relative w-full aspect-square">
+          <Image
+            src={product.imageUrl}
+            alt={product.name}
+            fill
+            className="object-cover"
+            unoptimized
+          />
+        </div>
       ) : (
         <div className="w-full aspect-square bg-muted flex items-center justify-center text-6xl">
           🛍️

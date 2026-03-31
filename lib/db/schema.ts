@@ -53,13 +53,20 @@ export const orders = pgTable(
   })
 );
 
-export const orderItems = pgTable('order_items', {
-  id: serial('id').primaryKey(),
-  orderId: integer('order_id').references(() => orders.id),
-  productId: integer('product_id').references(() => products.id),
-  quantity: integer('quantity').notNull(),
-  priceUsdt: numeric('price_usdt', { precision: 18, scale: 6 }).notNull(),
-});
+export const orderItems = pgTable(
+  'order_items',
+  {
+    id: serial('id').primaryKey(),
+    orderId: integer('order_id').references(() => orders.id),
+    productId: integer('product_id').references(() => products.id),
+    quantity: integer('quantity').notNull(),
+    priceUsdt: numeric('price_usdt', { precision: 18, scale: 6 }).notNull(),
+  },
+  (t) => ({
+    orderIdIdx: index('order_items_order_id_idx').on(t.orderId),
+    productIdIdx: index('order_items_product_id_idx').on(t.productId),
+  })
+);
 
 export const messages = pgTable(
   'messages',

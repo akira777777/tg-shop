@@ -1,5 +1,9 @@
 import { ADMIN_IDS, MINI_APP_URL, tgSend } from './telegram-api';
 
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function explorerLink(txHash: string, paymentMethod: 'trc20' | 'ton'): string {
   return paymentMethod === 'ton'
     ? `https://tonscan.org/tx/${txHash}`
@@ -46,7 +50,9 @@ export async function notifyNewOrder(params: {
   firstName?: string;
 }): Promise<void> {
   const { orderId, userId, totalUsdt, itemCount, username, firstName } = params;
-  const userLabel = username ? `@${username}` : (firstName ?? `#${userId}`);
+  const userLabel = username
+    ? `@${escapeHtml(username)}`
+    : firstName ? escapeHtml(firstName) : `#${userId}`;
 
   const text =
     `🛒 <b>Новый заказ #${orderId}</b>\n\n` +
@@ -54,15 +60,20 @@ export async function notifyNewOrder(params: {
     `💰 Сумма: $${totalUsdt} USDT\n` +
     `📦 Позиций: ${itemCount}`;
 
-  await Promise.allSettled(
+  const results = await Promise.allSettled(
     ADMIN_IDS.map((adminId) =>
       tgSend(adminId, text, {
         inline_keyboard: [
           [{ text: `📝 Управлять #${orderId}`, callback_data: `admin_order_${orderId}` }],
         ],
-      }).catch((err) => console.error(`[notify] Could not reach admin ${adminId}:`, err)),
+      }),
     ),
   );
+  for (const r of results) {
+    if (r.status === 'rejected') {
+      console.error(`[notify] Could not reach admin:`, r.reason);
+    }
+  }
 }
 
 export async function notifyOrderExpired(userId: number, orderId: number): Promise<void> {
@@ -100,19 +111,22 @@ export async function notifyNewSuggestion(params: {
   firstName?: string;
 }): Promise<void> {
   const { userId, productName, description, username, firstName } = params;
-  const userLabel = username ? `@${username}` : (firstName ?? `#${userId}`);
+  const userLabel = username
+    ? `@${escapeHtml(username)}`
+    : firstName ? escapeHtml(firstName) : `#${userId}`;
 
   const text =
     `💡 <b>Новое предложение товара</b>\n\n` +
     `👤 От: ${userLabel}\n` +
-    `📦 Товар: ${productName}` +
-    (description ? `\n📝 Описание: ${description}` : '');
+    `📦 Товар: ${escapeHtml(productName)}` +
+    (description ? `\n📝 Описание: ${escapeHtml(description)}` : '');
 
-  await Promise.allSettled(
-    ADMIN_IDS.map((adminId) =>
-      tgSend(adminId, text).catch((err) =>
-        console.error(`[notify] Could not reach admin ${adminId}:`, err),
-      ),
-    ),
+  const results = await Promise.allSettled(
+    ADMIN_IDS.map((adminId) => tgSend(adminId, text)),
   );
+  for (const r of results) {
+    if (r.status === 'rejected') {
+      console.error(`[notify] Could not reach admin:`, r.reason);
+    }
+  }
 }

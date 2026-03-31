@@ -4,6 +4,7 @@ import { eq, desc, sql, and, gte, inArray } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { notifyNewOrder } from '@/lib/bot/notifications';
+import { invalidateProductsCache } from '@/lib/products-cache';
 import { acquireAddress, releaseAddress } from '@/lib/tron/pool';
 import { getTonUsdPrice, usdtToTon, orderComment } from '@/lib/ton/price';
 import { verifyInitData } from '@/lib/telegram-auth';
@@ -242,6 +243,11 @@ export async function POST(req: NextRequest): Promise<Response> {
       }
       throw err;
     }
+
+    // Invalidate product cache so next catalog load reflects updated stock
+    invalidateProductsCache().catch((err) =>
+      console.error('[POST /api/orders] Cache invalidation failed:', err)
+    );
 
     // Fire-and-forget: notification failure must not block the order response
     notifyNewOrder({

@@ -36,7 +36,9 @@ Two blockchains are supported:
 - **TRC20 USDT** — A pool of pre-funded deposit addresses is seeded from `TRON_DEPOSIT_ADDRESS_POOL` (comma-separated) into a Redis set (`tron:pool:available`). `lib/tron/pool.ts` atomically pops one address per order (`acquireAddress`) and returns it after payment or expiry (`releaseAddress`).
 - **TON** — A single wallet (`TON_WALLET_ADDRESS`) receives all TON payments. Orders are distinguished by a comment in the format `ORDER-{id}`. The TON amount is converted from USDT using a CoinGecko price (cached in Redis as `ton:usd_price`, 5-min TTL). Payments allow up to 1% underpayment to handle price drift.
 
-A Vercel cron (`/api/payments/verify`, every minute, authenticated by `CRON_SECRET`) calls both monitors in parallel. Both monitors first expire stale `awaiting_payment` orders (returning TRC20 addresses to the pool), then poll their respective chain APIs.
+Payment verification runs every minute via **Upstash QStash** (not a Vercel cron — Hobby plan only allows daily). QStash calls `POST /api/payments/verify` with `Authorization: Bearer <CRON_SECRET>`. Both monitors run in parallel, first expiring stale `awaiting_payment` orders (returning TRC20 addresses to the pool), then polling their respective chain APIs. `vercel.json` is intentionally empty (`{}`).
+
+To set up the QStash schedule: create a schedule in the Upstash console (or via API) with `rate: every 1 minute`, target URL `https://<your-domain>/api/payments/verify`, and header `Authorization: Bearer <CRON_SECRET>`.
 
 TRC20 uses idempotency on `txHash IS NULL` before marking paid. Both monitors call `notifyPaymentConfirmed()` on success.
 
@@ -123,7 +125,8 @@ Two separate Redis connections are used:
 | `DATABASE_URL` | PostgreSQL connection string |
 | `UPSTASH_REDIS_REST_URL` / `_TOKEN` | Redis for address pool, product cache, TON price cache |
 | `UPSTASH_REDIS_URL` | Redis connection URL (`rediss://...`) for Chat SDK state adapter |
-| `CRON_SECRET` | Authenticates the payment verify cron |
+| `CRON_SECRET` | Authenticates `/api/payments/verify` (sent as `Authorization: Bearer` by QStash) |
+| `QSTASH_TOKEN` | Upstash QStash token — needed to create/manage the every-minute payment verify schedule |
 | `ORDER_TTL_MINUTES` | Order expiry — TRC20 default 30 min, TON default 60 min |
 | `NEXT_PUBLIC_ALLOW_DEV_AUTH` | Set `true` for dev auth bypass (dev only) |
 | `NEXT_PUBLIC_DEV_TELEGRAM_USER_ID` | Synthetic user ID for dev auth bypass |

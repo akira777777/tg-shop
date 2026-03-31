@@ -1,6 +1,6 @@
 import { db } from '@/lib/db';
 import { orders } from '@/lib/db/schema';
-import { eq, and, lt, isNull } from 'drizzle-orm';
+import { eq, and, lt, isNull, inArray } from 'drizzle-orm';
 import { notifyPaymentConfirmed, notifyOrderExpired } from '@/lib/bot/notifications';
 import { releaseAddress } from './pool';
 
@@ -103,12 +103,12 @@ async function expireStaleOrders(): Promise<void> {
       )
     );
 
-  for (const order of stale) {
-    await db
-      .update(orders)
-      .set({ status: 'cancelled' })
-      .where(eq(orders.id, order.id));
+  const staleIds = stale.map((o) => o.id);
+  if (staleIds.length > 0) {
+    await db.update(orders).set({ status: 'cancelled' }).where(inArray(orders.id, staleIds));
+  }
 
+  for (const order of stale) {
     // Return TRC20 address to the pool so it can be reused
     await releaseAddress(order.paymentAddress).catch((err) =>
       console.error(`[tron-monitor] Failed to release address for expired order ${order.id}:`, err)

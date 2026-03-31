@@ -15,11 +15,11 @@ export async function GET(req: NextRequest): Promise<Response> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  try {
-    await Promise.all([checkTronPayments(), checkTonPayments()]);
-    return NextResponse.json({ ok: true });
-  } catch (err) {
-    console.error('[cron /api/payments/verify]', err);
-    return NextResponse.json({ error: 'Cron failed' }, { status: 500 });
+  const results = await Promise.allSettled([checkTronPayments(), checkTonPayments()]);
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      console.error('[cron /api/payments/verify] Monitor threw:', result.reason);
+    }
   }
+  return NextResponse.json({ ok: true });
 }
