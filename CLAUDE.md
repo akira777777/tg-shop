@@ -15,6 +15,13 @@ npm run db:push      # Push Drizzle schema changes to Postgres (non-destructive)
 npm run db:studio    # Open Drizzle Studio (local DB GUI)
 ```
 
+**`db:push` gotcha**: `drizzle-kit` does not auto-load `.env.local`. Pass `DATABASE_URL` explicitly:
+```bash
+DATABASE_URL='postgresql://...' npm run db:push
+```
+
+**Package manager**: The repo has both `pnpm-lock.yaml` (used by Vercel CI) and `package-lock.json`. Vercel builds with pnpm. Use `pnpm` for local installs to avoid lock-file drift.
+
 No test suite is configured.
 
 ## Architecture
@@ -24,6 +31,8 @@ This is a **Telegram Mini App** e-commerce store with crypto payments. It runs a
 ### Authentication
 
 Every user-facing API route authenticates via Telegram's HMAC-SHA256 `initData` signature. The client sends the raw `initData` string in an `x-init-data` request header; routes call `verifyInitData()` from `lib/telegram-auth.ts` which returns the parsed `TelegramUser` or `null`.
+
+**HMAC note**: `lib/telegram-auth.ts` uses `createHmac(algo, 'WebAppData').update(botToken)` — this is correct per the Telegram spec. Do not change it.
 
 Admin routes (`/api/admin/*`) instead check the caller's Telegram ID against `ADMIN_CHAT_IDS` via `lib/admin-auth.ts`.
 
@@ -46,7 +55,7 @@ TRC20 uses idempotency on `txHash IS NULL` before marking paid. Both monitors ca
 
 | Key | TTL | Purpose |
 |---|---|---|
-| `catalog:products` | 5 min | Product list (`lib/products-cache.ts`); invalidated on any admin product write |
+| `catalog:products` | 5 min | Product list (`lib/products-cache.ts`); invalidated on any admin product write **and** on new order creation (stock changes) |
 | `tron:pool:available` | permanent | Redis set of available TRC20 deposit addresses |
 | `ton:usd_price` | 5 min | TON/USD rate from CoinGecko |
 
