@@ -4,6 +4,7 @@ import { desc } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { isAdmin } from '@/lib/admin-auth';
+import { invalidateProductsCache } from '@/lib/products-cache';
 
 const CreateProductSchema = z.object({
   adminId: z.number().int(),
@@ -54,6 +55,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       .insert(products)
       .values({ name, description: description ?? null, priceUsdt, category, imageUrl: imageUrl ?? null, stock })
       .returning();
+    await invalidateProductsCache().catch(() => {});
     return NextResponse.json(created, { status: 201 });
   } catch (err) {
     console.error('[POST /api/admin/products]', err);

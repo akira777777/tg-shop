@@ -3,6 +3,7 @@ import { products } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
 import { isAdmin } from '@/lib/admin-auth';
+import { invalidateProductsCache } from '@/lib/products-cache';
 
 export async function PATCH(
   req: NextRequest,
@@ -65,6 +66,7 @@ export async function PATCH(
     if (!updated) {
       return NextResponse.json({ error: 'Product not found' }, { status: 404 });
     }
+    await invalidateProductsCache().catch(() => {});
     return NextResponse.json(updated);
   } catch (err) {
     console.error('[PATCH /api/admin/products/:id]', err);

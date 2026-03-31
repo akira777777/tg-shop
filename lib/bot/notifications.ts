@@ -41,20 +41,20 @@ export async function notifyNewOrder(params: {
   const { orderId, userId, totalUsdt, itemCount, username, firstName } = params;
   const userLabel = username ? `@${username}` : (firstName ?? `#${userId}`);
 
-  // Tap to jump straight to the order management view (registered in commands.ts)
   const keyboard = new InlineKeyboard().text(`📝 Управлять #${orderId}`, `admin_order_${orderId}`);
-
   const text =
     `🛒 *Новый заказ #${orderId}*\n\n` +
     `👤 Покупатель: ${userLabel}\n` +
     `💰 Сумма: $${totalUsdt} USDT\n` +
     `📦 Позиций: ${itemCount}`;
 
-  for (const adminId of ADMIN_IDS) {
-    await bot.api
-      .sendMessage(adminId, text, { parse_mode: 'Markdown', reply_markup: keyboard })
-      .catch((err) => console.error(`[notify] Could not reach admin ${adminId}:`, err));
-  }
+  await Promise.allSettled(
+    ADMIN_IDS.map((adminId) =>
+      bot.api
+        .sendMessage(adminId, text, { parse_mode: 'Markdown', reply_markup: keyboard })
+        .catch((err) => console.error(`[notify] Could not reach admin ${adminId}:`, err))
+    )
+  );
 }
 
 const ORDER_STATUS_MESSAGES: Partial<Record<string, string>> = {
@@ -95,9 +95,11 @@ export async function notifyNewSuggestion(params: {
     `📦 Товар: ${productName}` +
     (description ? `\n📝 Описание: ${description}` : '');
 
-  for (const adminId of ADMIN_IDS) {
-    await bot.api
-      .sendMessage(adminId, text, { parse_mode: 'Markdown' })
-      .catch((err) => console.error(`[notify] Could not reach admin ${adminId}:`, err));
-  }
+  await Promise.allSettled(
+    ADMIN_IDS.map((adminId) =>
+      bot.api
+        .sendMessage(adminId, text, { parse_mode: 'Markdown' })
+        .catch((err) => console.error(`[notify] Could not reach admin ${adminId}:`, err))
+    )
+  );
 }

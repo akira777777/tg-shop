@@ -36,16 +36,13 @@ export function registerRelayHandlers(bot: Bot<Context>): void {
       `📨 *Сообщение от ${escapeMarkdown(userLabel)}*\n\n` +
       escapeMarkdown(ctx.message.text);
 
-    for (const adminId of ADMIN_IDS) {
-      try {
-        await ctx.api.sendMessage(adminId, text, {
-          parse_mode: 'Markdown',
-          reply_markup: keyboard,
-        });
-      } catch (err) {
-        console.error(`[relay] Could not reach admin ${adminId}:`, err);
-      }
-    }
+    await Promise.allSettled(
+      ADMIN_IDS.map((adminId) =>
+        ctx.api
+          .sendMessage(adminId, text, { parse_mode: 'Markdown', reply_markup: keyboard })
+          .catch((err) => console.error(`[relay] Could not reach admin ${adminId}:`, err))
+      )
+    );
 
     try {
       await db.insert(messages).values({

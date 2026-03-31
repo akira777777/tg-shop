@@ -1,6 +1,6 @@
 import { db } from '@/lib/db';
 import { orders, orderItems, products, users } from '@/lib/db/schema';
-import { eq, desc, sql, and, gte } from 'drizzle-orm';
+import { eq, desc, sql, and, gte, inArray } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { notifyNewOrder } from '@/lib/bot/notifications';
@@ -145,18 +145,22 @@ export async function POST(req: NextRequest): Promise<Response> {
       .values({ telegramId: user.id, firstName: user.first_name, username: user.username })
       .onConflictDoNothing();
 
+    // Fetch all needed products in one query instead of N individual lookups
+    const productIds = [...new Set(items.map((i) => i.productId))];
+    const productRows = await db
+      .select()
+      .from(products)
+      .where(and(inArray(products.id, productIds), eq(products.active, true)));
+    const productMap = new Map(productRows.map((p) => [p.id, p]));
+
     // Resolve products and compute total using integer micro-USDT to avoid float drift
     let totalMicro = 0n;
     const resolvedItems: Array<{ productId: number; quantity: number; priceUsdt: string }> = [];
 
     for (const item of items) {
-      const [product] = await db
-        .select()
-        .from(products)
-        .where(eq(products.id, item.productId))
-        .limit(1);
+      const product = productMap.get(item.productId);
 
-      if (!product || !product.active) {
+      if (!product) {
         if (paymentMethod === 'trc20') await releaseAddress(paymentAddress).catch(() => {});
         return NextResponse.json({ error: `Product ${item.productId} not available` }, { status: 400 });
       }

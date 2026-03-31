@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ProductCard } from '@/components/catalog/product-card';
 import { CartFab } from '@/components/catalog/cart-fab';
@@ -30,12 +30,20 @@ export default function CatalogPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const categories = ['All', ...Array.from(new Set(products.map((p) => p.category)))];
-  const filtered = products.filter((p) => {
-    const matchCategory = activeTab === 'All' || p.category === activeTab;
-    const matchSearch = p.name.toLowerCase().includes(search.toLowerCase());
-    return matchCategory && matchSearch;
-  });
+  const categories = useMemo(
+    () => ['All', ...Array.from(new Set(products.map((p) => p.category)))],
+    [products]
+  );
+
+  const filtered = useMemo(
+    () =>
+      products.filter((p) => {
+        const matchCategory = activeTab === 'All' || p.category === activeTab;
+        const matchSearch = p.name.toLowerCase().includes(search.toLowerCase());
+        return matchCategory && matchSearch;
+      }),
+    [products, activeTab, search]
+  );
 
   if (loading) {
     return (
