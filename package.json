@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "bot:poll": "node --import tsx bot-poll.ts",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
   },
@@ -19,6 +20,7 @@
     "chat": "^4.23.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "dotenv": "^17.2.3",
     "drizzle-orm": "^0.45.2",
     "lucide-react": "^1.7.0",
     "next": "16.2.1",
@@ -40,6 +42,7 @@
     "drizzle-kit": "^0.31.10",
     "eslint-config-next": "16.2.1",
     "tailwindcss": "^4",
+    "tsx": "^4.20.6",
     "typescript": "^5"
   }
 }
