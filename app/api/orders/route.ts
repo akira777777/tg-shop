@@ -8,6 +8,8 @@ import { acquireAddress, releaseAddress } from '@/lib/tron/pool';
 import { getTonUsdPrice, usdtToTon, orderComment } from '@/lib/ton/price';
 import { verifyInitData } from '@/lib/telegram-auth';
 
+const MICRO_USDT = BigInt(1_000_000);
+
 const CreateOrderSchema = z.object({
   items: z
     .array(
@@ -154,7 +156,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     const productMap = new Map(productRows.map((p) => [p.id, p]));
 
     // Resolve products and compute total using integer micro-USDT to avoid float drift
-    let totalMicro = 0n;
+    let totalMicro = BigInt(0);
     const resolvedItems: Array<{ productId: number; quantity: number; priceUsdt: string }> = [];
 
     for (const item of items) {
@@ -172,15 +174,15 @@ export async function POST(req: NextRequest): Promise<Response> {
       // Parse price string e.g. "10.500000" → micro-USDT BigInt
       const [whole, frac = ''] = product.priceUsdt.split('.');
       const fracPadded = frac.padEnd(6, '0').slice(0, 6);
-      const priceMicro = BigInt(whole) * 1_000_000n + BigInt(fracPadded);
+      const priceMicro = BigInt(whole) * MICRO_USDT + BigInt(fracPadded);
       totalMicro += priceMicro * BigInt(item.quantity);
 
       resolvedItems.push({ productId: item.productId, quantity: item.quantity, priceUsdt: product.priceUsdt });
     }
 
     // Format total as "X.XXXXXX"
-    const totalWhole = totalMicro / 1_000_000n;
-    const totalFrac = totalMicro % 1_000_000n;
+    const totalWhole = totalMicro / MICRO_USDT;
+    const totalFrac = totalMicro % MICRO_USDT;
     const totalUsdt = `${totalWhole}.${totalFrac.toString().padStart(6, '0')}`;
 
     // Compute TON equivalent if needed

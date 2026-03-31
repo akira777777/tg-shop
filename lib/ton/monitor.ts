@@ -8,7 +8,8 @@ const TON_WALLET = process.env.TON_WALLET_ADDRESS!;
 const TONCENTER_BASE = process.env.TONCENTER_API_URL ?? 'https://toncenter.com/api/v2';
 const ORDER_TTL_MINUTES = parseInt(process.env.ORDER_TTL_MINUTES ?? '60', 10);
 // Allow up to 1% underpayment to handle minor price drift
-const TOLERANCE_BPS = 99n; // 99/100
+const TOLERANCE_BPS = BigInt(99); // 99/100
+const TOLERANCE_DIVISOR = BigInt(100);
 
 interface TonCenterTx {
   transaction_id: { hash: string };
@@ -68,7 +69,7 @@ export async function checkPendingPayments(): Promise<void> {
       const comment = tx.in_msg.message ?? '';
       const value = BigInt(tx.in_msg.value ?? '0');
       // comment must match exactly; value must be within tolerance
-      return comment === expectedComment && value >= (expectedNano * TOLERANCE_BPS) / 100n;
+      return comment === expectedComment && value >= (expectedNano * TOLERANCE_BPS) / TOLERANCE_DIVISOR;
     });
 
     if (!match) continue;
