@@ -44,15 +44,12 @@ const STATUS_LABEL: Record<string, string> = {
 
 export default function OrdersPage() {
   const router = useRouter();
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState(true);
   const user = useMemo(() => getTelegramUser(), []);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(!!user);
 
   useEffect(() => {
-    if (!user) {
-      setLoading(false);
-      return;
-    }
+    if (!user) return;
 
     fetch(`/api/orders?userId=${user.id}`)
       .then((r) => r.json())

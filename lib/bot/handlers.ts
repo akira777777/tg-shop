@@ -1,5 +1,5 @@
 import { Actions, Button, Card, CardText, LinkButton } from 'chat';
-import type { Chat, Thread } from 'chat';
+import type { Adapter, Chat, Thread } from 'chat';
 import { desc, eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { messages as messagesTable, orderItems, orders, products, users } from '@/lib/db/schema';
@@ -70,7 +70,7 @@ async function upsertUser(
 }
 
 async function relayToAdmins(
-  bot: Chat<never, ThreadState>,
+  bot: Chat<Record<string, Adapter>, ThreadState>,
   userId: number,
   userLabel: string,
   text: string,
@@ -120,7 +120,7 @@ async function handleStatus(
   });
 }
 
-export function registerBotHandlers(bot: Chat<never, ThreadState>): void {
+export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadState>): void {
   // ── New DM (first contact, thread not yet subscribed) ─────────────────────
   bot.onDirectMessage(async (thread, message) => {
     const authorId = parseInt(message.author.userId);

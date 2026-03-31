@@ -134,7 +134,7 @@ function CheckoutInner() {
             {loading ? 'Confirming…' : 'I\u0027ve sent the payment'}
           </button>
           <p className="text-center text-xs text-muted-foreground mt-2">
-            We'll verify automatically. This just starts the watch.
+            We&apos;ll verify automatically. This just starts the watch.
           </p>
         </div>
       )}
