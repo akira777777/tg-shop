@@ -10,9 +10,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm run dev          # Start development server
 npm run build        # Production build
 npm run lint         # ESLint
+npm run bot:poll     # Run Telegram bot in long-polling mode (local dev only)
 npm run db:push      # Push Drizzle schema changes to Postgres (non-destructive)
 npm run db:studio    # Open Drizzle Studio (local DB GUI)
-npx tsx bot-poll.ts  # Run Telegram bot in long-polling mode (local dev only)
 ```
 
 No test suite is configured.
@@ -78,7 +78,29 @@ Cart is Zustand (`lib/cart-store.ts`) persisted to `localStorage`. No server-sid
 
 ### Admin
 
-`/admin` is a client-side dashboard protected by `lib/admin-auth.ts` (checks `ADMIN_CHAT_IDS`). It manages products, orders, and suggestions via `/api/admin/*` routes.
+`/admin` is a client-side dashboard protected by `lib/admin-auth.ts` (checks `ADMIN_CHAT_IDS`). It manages products, orders, and suggestions via `/api/admin/*` routes. There is no server-side middleware guarding `/admin` — protection is client-side only.
+
+### i18n
+
+All UI strings go through `lib/i18n.ts`. To add a string: add a key to the `dict` constant with both `ru` and `en` values, then use `useT()` (React hook, client components) or `t(key, locale, params)` (non-reactive). The locale is detected from `window.Telegram.WebApp.initDataUnsafe.user.language_code` and set in the Zustand store by `TelegramInit` on mount. Supports `{placeholder}` interpolation in translation strings.
+
+### Monetary Precision
+
+All prices are stored as `numeric(18,6)` (USDT) or `numeric(18,9)` (TON amounts). Payment monitors convert USDT to BigInt microsatoshis (`value * 1_000_000`) for comparison — never use floating-point arithmetic when matching payment amounts.
+
+### TRC20 Address Pool
+
+`lib/tron/pool.ts` auto-seeds the Redis set (`tron:pool:available`) from `TRON_DEPOSIT_ADDRESS_POOL` only when the set is **empty**. If the pool already has entries, adding addresses to the env var has no effect — use `redis.sadd('tron:pool:available', ...newAddresses)` directly.
+
+### Redis Clients
+
+Two separate Redis connections are used:
+- `lib/redis.ts` — `@upstash/redis` REST client (`UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`). Used for product cache, TRC20 pool, and TON price.
+- Chat SDK state adapter — ioredis-compatible `UPSTASH_REDIS_URL` (`rediss://...`). Used exclusively for bot thread state in `lib/bot/index.ts`.
+
+### Telegram WebApp Initialization
+
+`components/telegram-init.tsx` (rendered in root layout) calls `WebApp.ready()`, `WebApp.expand()`, and optionally `WebApp.requestFullscreen()` (guarded to Telegram client v7+). It also reads `language_code` from `initDataUnsafe` to set the i18n locale. The Telegram SDK script (`telegram-web-app.js`) is loaded with `strategy="beforeInteractive"` in the root layout.
 
 ## Key Environment Variables
 

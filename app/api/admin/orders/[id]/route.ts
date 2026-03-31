@@ -1,6 +1,6 @@
 import { db } from '@/lib/db';
 import { orders } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAdmin } from '@/lib/admin-auth';
 import { notifyOrderStatusChanged } from '@/lib/bot/notifications';
@@ -39,7 +39,8 @@ export async function PATCH(
       .update(orders)
       .set({
         status: body.status,
-        ...(body.status === 'paid' ? { paidAt: new Date() } : {}),
+        // Preserve existing paidAt if already set — only stamp it the first time
+        ...(body.status === 'paid' ? { paidAt: sql`COALESCE(paid_at, NOW())` } : {}),
       })
       .where(eq(orders.id, orderId))
       .returning();

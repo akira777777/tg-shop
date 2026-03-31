@@ -18,6 +18,12 @@ export interface TelegramUser {
  */
 export function verifyInitData(initData: string): TelegramUser | null {
   try {
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+    if (!botToken) {
+      console.error('[auth] TELEGRAM_BOT_TOKEN is not set — all initData verification will fail');
+      return null;
+    }
+
     const params = new URLSearchParams(initData);
     const hash = params.get('hash');
     if (!hash) return null;
@@ -30,7 +36,7 @@ export function verifyInitData(initData: string): TelegramUser | null {
 
     const secretKey = crypto
       .createHmac('sha256', 'WebAppData')
-      .update(process.env.TELEGRAM_BOT_TOKEN ?? '')
+      .update(botToken)
       .digest();
 
     const computed = crypto

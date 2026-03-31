@@ -42,6 +42,7 @@ export async function checkPendingPayments(): Promise<void> {
           headers: {
             'TRON-PRO-API-KEY': process.env.TRONGRID_API_KEY ?? '',
           },
+          signal: AbortSignal.timeout(10_000),
         }
       );
 

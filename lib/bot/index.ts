@@ -11,16 +11,22 @@ let _bot: Chat | undefined;
 export function getBot(): Chat {
   if (!_bot) {
     const redisUrl = process.env.UPSTASH_REDIS_URL ?? process.env.REDIS_URL;
+
+    if (!redisUrl) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(
+          '[bot] UPSTASH_REDIS_URL is required in production. ' +
+            'Bot thread state cannot persist across serverless invocations without Redis.',
+        );
+      }
+      console.warn(
+        '[bot] UPSTASH_REDIS_URL/REDIS_URL is not set, using in-memory state (dev only).',
+      );
+    }
+
     const state = redisUrl
       ? createRedisState({ url: redisUrl })
       : createMemoryState();
-
-    if (!redisUrl) {
-      console.warn(
-        '[bot] UPSTASH_REDIS_URL/REDIS_URL is not set, using in-memory state. ' +
-          'Configure Redis for production webhooks.',
-      );
-    }
 
     _bot = new Chat({
       userName: process.env.TELEGRAM_BOT_USERNAME ?? 'shopbot',

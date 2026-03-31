@@ -51,7 +51,11 @@ export async function checkPendingPayments(): Promise<void> {
 
   let txs: TonCenterTx[];
   try {
-    const res = await fetch(url.toString(), { headers, cache: 'no-store' });
+    const res = await fetch(url.toString(), {
+      headers,
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10_000),
+    });
     if (!res.ok) {
       console.error('[ton-monitor] TonCenter error:', res.status);
       return;
