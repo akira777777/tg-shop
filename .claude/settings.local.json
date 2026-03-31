@@ -6,7 +6,13 @@
       "Bash(npx tsx:*)",
       "Bash(npm run:*)",
       "Bash(taskkill /F /IM node.exe)",
-      "Bash(taskkill /F /IM tsx.exe)"
+      "Bash(taskkill /F /IM tsx.exe)",
+      "mcp__MCP_DOCKER__read_file",
+      "Bash(grep -r \"acquireAddress\\\\|releaseAddress\\\\|TRON_WALLET\\\\|paymentAddress\" /c/Users/fear7/Desktop/noct2/tg-shop/app/api --include=*.ts)",
+      "Bash(cat app/api/admin/orders/[id]/route.ts)",
+      "Bash(cat app/api/admin/products/[id]/route.ts)",
+      "Bash(cat:*)",
+      "Bash(wc -l app/api/**/*.ts lib/**/*.ts)"
     ]
   }
 }

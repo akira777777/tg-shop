@@ -1,6 +1,6 @@
 import { db } from '@/lib/db';
 import { orders } from '@/lib/db/schema';
-import { eq, and, lt } from 'drizzle-orm';
+import { eq, and, lt, isNull } from 'drizzle-orm';
 import { notifyPaymentConfirmed } from '@/lib/bot/notifications';
 import { orderComment } from './price';
 
@@ -74,12 +74,14 @@ export async function checkPendingPayments(): Promise<void> {
     if (!match) continue;
 
     try {
-      await db
+      // Idempotency guard: only update if txHash is not yet set
+      const updated = await db
         .update(orders)
         .set({ status: 'paid', txHash: match.transaction_id.hash, paidAt: new Date() })
-        .where(eq(orders.id, order.id));
+        .where(and(eq(orders.id, order.id), isNull(orders.txHash)))
+        .returning({ id: orders.id });
 
-      if (order.userId) {
+      if (updated.length > 0 && order.userId) {
         await notifyPaymentConfirmed(order.userId, order.id, match.transaction_id.hash);
       }
     } catch (err) {

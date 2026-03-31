@@ -1,7 +1,8 @@
 import { db } from '@/lib/db';
 import { orders } from '@/lib/db/schema';
-import { eq, and, lt } from 'drizzle-orm';
+import { eq, and, lt, isNull } from 'drizzle-orm';
 import { notifyPaymentConfirmed } from '@/lib/bot/notifications';
+import { releaseAddress } from './pool';
 
 const USDT_CONTRACT =
   process.env.TRON_USDT_CONTRACT ?? 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
@@ -20,7 +21,7 @@ interface TronGridTx {
 }
 
 /**
- * Polls TronGrid for all orders in 'awaiting_payment' status.
+ * Polls TronGrid for all TRC20 orders in 'awaiting_payment' status.
  * Also expires stale orders older than ORDER_TTL_MINUTES.
  * Called by the Vercel Cron every minute.
  */
@@ -30,7 +31,7 @@ export async function checkPendingPayments(): Promise<void> {
   const pending = await db
     .select()
     .from(orders)
-    .where(eq(orders.status, 'awaiting_payment'));
+    .where(and(eq(orders.status, 'awaiting_payment'), eq(orders.paymentMethod, 'trc20')));
 
   for (const order of pending) {
     try {
@@ -53,7 +54,6 @@ export async function checkPendingPayments(): Promise<void> {
         Math.round(parseFloat(order.totalUsdt) * 1_000_000)
       );
 
-      // Require the configured number of confirmations
       const match = txs.find(
         (tx) =>
           tx.to === order.paymentAddress &&
@@ -62,17 +62,25 @@ export async function checkPendingPayments(): Promise<void> {
       );
 
       if (match) {
-        await db
+        // Idempotency guard: only update if txHash is not yet set
+        const updated = await db
           .update(orders)
           .set({ status: 'paid', txHash: match.transaction_id, paidAt: new Date() })
-          .where(eq(orders.id, order.id));
+          .where(and(eq(orders.id, order.id), isNull(orders.txHash)))
+          .returning({ id: orders.id });
 
-        if (order.userId) {
-          await notifyPaymentConfirmed(order.userId, order.id, match.transaction_id);
+        if (updated.length > 0) {
+          // Return the address to the pool for reuse
+          await releaseAddress(order.paymentAddress).catch((err) =>
+            console.error(`[tron-monitor] Failed to release address for order ${order.id}:`, err)
+          );
+          if (order.userId) {
+            await notifyPaymentConfirmed(order.userId, order.id, match.transaction_id);
+          }
         }
       }
     } catch {
-      console.error(`[monitor] Failed to check order ${order.id}`);
+      console.error(`[tron-monitor] Failed to check order ${order.id}`);
     }
   }
 }
@@ -86,6 +94,7 @@ async function expireStaleOrders(): Promise<void> {
     .where(
       and(
         eq(orders.status, 'awaiting_payment'),
+        eq(orders.paymentMethod, 'trc20'),
         lt(orders.createdAt, cutoff)
       )
     );
@@ -95,5 +104,10 @@ async function expireStaleOrders(): Promise<void> {
       .update(orders)
       .set({ status: 'cancelled' })
       .where(eq(orders.id, order.id));
+
+    // Return TRC20 address to the pool so it can be reused
+    await releaseAddress(order.paymentAddress).catch((err) =>
+      console.error(`[tron-monitor] Failed to release address for expired order ${order.id}:`, err)
+    );
   }
 }

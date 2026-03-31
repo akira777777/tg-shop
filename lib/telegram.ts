@@ -21,6 +21,11 @@ export function getTelegramUser() {
   return null;
 }
 
+export function getInitData(): string {
+  if (typeof window === 'undefined') return '';
+  return window.Telegram?.WebApp?.initData ?? '';
+}
+
 export function closeMiniApp() {
   window.Telegram?.WebApp?.close();
 }
@@ -41,6 +46,7 @@ declare global {
         ready: () => void;
         expand: () => void;
         close: () => void;
+        initData: string;
         initDataUnsafe: {
           user?: { id: number; first_name: string; username?: string };
         };

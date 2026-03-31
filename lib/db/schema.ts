@@ -7,6 +7,7 @@ import {
   boolean,
   numeric,
   timestamp,
+  index,
 } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
@@ -27,19 +28,27 @@ export const products = pgTable('products', {
   active: boolean('active').notNull().default(true),
 });
 
-export const orders = pgTable('orders', {
-  id: serial('id').primaryKey(),
-  userId: bigint('user_id', { mode: 'number' }).references(() => users.telegramId),
-  // pending | awaiting_payment | paid | processing | shipped | delivered | cancelled
-  status: text('status').notNull().default('pending'),
-  totalUsdt: numeric('total_usdt', { precision: 18, scale: 6 }).notNull(),
-  paymentMethod: text('payment_method').notNull().default('trc20'), // 'ton' | 'trc20'
-  paymentAddress: text('payment_address').notNull(),
-  paymentAmountTon: numeric('payment_amount_ton', { precision: 18, scale: 9 }),
-  txHash: text('tx_hash'),
-  createdAt: timestamp('created_at').defaultNow(),
-  paidAt: timestamp('paid_at'),
-});
+export const orders = pgTable(
+  'orders',
+  {
+    id: serial('id').primaryKey(),
+    userId: bigint('user_id', { mode: 'number' }).references(() => users.telegramId),
+    // pending | awaiting_payment | paid | processing | shipped | delivered | cancelled
+    status: text('status').notNull().default('pending'),
+    totalUsdt: numeric('total_usdt', { precision: 18, scale: 6 }).notNull(),
+    paymentMethod: text('payment_method').notNull().default('trc20'), // 'ton' | 'trc20'
+    paymentAddress: text('payment_address').notNull(),
+    paymentAmountTon: numeric('payment_amount_ton', { precision: 18, scale: 9 }),
+    txHash: text('tx_hash'),
+    createdAt: timestamp('created_at').defaultNow(),
+    paidAt: timestamp('paid_at'),
+  },
+  (t) => ({
+    statusIdx: index('orders_status_idx').on(t.status),
+    userIdIdx: index('orders_user_id_idx').on(t.userId),
+    paymentMethodIdx: index('orders_payment_method_idx').on(t.paymentMethod),
+  })
+);
 
 export const orderItems = pgTable('order_items', {
   id: serial('id').primaryKey(),
@@ -49,15 +58,21 @@ export const orderItems = pgTable('order_items', {
   priceUsdt: numeric('price_usdt', { precision: 18, scale: 6 }).notNull(),
 });
 
-export const messages = pgTable('messages', {
-  id: serial('id').primaryKey(),
-  userId: bigint('user_id', { mode: 'number' }).references(() => users.telegramId),
-  // 'user_to_admin' | 'admin_to_user'
-  direction: text('direction').notNull(),
-  content: text('content').notNull(),
-  telegramMsgId: integer('telegram_msg_id'),
-  createdAt: timestamp('created_at').defaultNow(),
-});
+export const messages = pgTable(
+  'messages',
+  {
+    id: serial('id').primaryKey(),
+    userId: bigint('user_id', { mode: 'number' }).references(() => users.telegramId),
+    // 'user_to_admin' | 'admin_to_user'
+    direction: text('direction').notNull(),
+    content: text('content').notNull(),
+    telegramMsgId: integer('telegram_msg_id'),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (t) => ({
+    directionIdx: index('messages_direction_idx').on(t.direction),
+  })
+);
 
 export const suggestions = pgTable('suggestions', {
   id: serial('id').primaryKey(),

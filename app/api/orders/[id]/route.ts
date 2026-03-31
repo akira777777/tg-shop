@@ -2,30 +2,28 @@ import { db } from '@/lib/db';
 import { orders } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
+import { verifyInitData } from '@/lib/telegram-auth';
 
-// GET /api/orders/:id?userId=123
+// GET /api/orders/:id — fetch a single order for the authenticated user
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<Response> {
+  const user = verifyInitData(req.headers.get('x-telegram-init-data') ?? '');
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
   const { id } = await params;
   const orderId = parseInt(id, 10);
-  const userId = parseInt(req.nextUrl.searchParams.get('userId') ?? '', 10);
-
-  if (isNaN(orderId) || isNaN(userId)) {
-    return NextResponse.json({ error: 'Invalid params' }, { status: 400 });
-  }
+  if (isNaN(orderId)) return NextResponse.json({ error: 'Invalid order id' }, { status: 400 });
 
   try {
     const [order] = await db
       .select()
       .from(orders)
-      .where(and(eq(orders.id, orderId), eq(orders.userId, userId)))
+      .where(and(eq(orders.id, orderId), eq(orders.userId, user.id)))
       .limit(1);
 
-    if (!order) {
-      return NextResponse.json({ error: 'Order not found' }, { status: 404 });
-    }
+    if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     return NextResponse.json(order);
   } catch (err) {
     console.error('[GET /api/orders/:id]', err);
@@ -33,44 +31,43 @@ export async function GET(
   }
 }
 
-// PATCH /api/orders/:id  — mark as awaiting_payment after user confirms send
+// PATCH /api/orders/:id — mark as awaiting_payment after user confirms they sent payment
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<Response> {
+  const user = verifyInitData(req.headers.get('x-telegram-init-data') ?? '');
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
   const { id } = await params;
   const orderId = parseInt(id, 10);
+  if (isNaN(orderId)) return NextResponse.json({ error: 'Invalid order id' }, { status: 400 });
 
-  let body: { userId?: number; status?: string };
   try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
-  }
-
-  if (!body.userId || isNaN(orderId)) {
-    return NextResponse.json({ error: 'Invalid params' }, { status: 400 });
-  }
-
-  // Only allow user to mark their own pending order as awaiting_payment
-  try {
-    const [order] = await db
-      .select()
-      .from(orders)
-      .where(and(eq(orders.id, orderId), eq(orders.userId, body.userId)))
-      .limit(1);
-
-    if (!order) {
-      return NextResponse.json({ error: 'Order not found' }, { status: 404 });
-    }
-    if (order.status !== 'pending') {
-      return NextResponse.json({ error: 'Order already submitted' }, { status: 409 });
-    }
-
-    await db
+    // Single atomic UPDATE prevents double-submission without a separate SELECT round-trip
+    const [updated] = await db
       .update(orders)
       .set({ status: 'awaiting_payment' })
-      .where(eq(orders.id, orderId));
+      .where(
+        and(
+          eq(orders.id, orderId),
+          eq(orders.userId, user.id),
+          eq(orders.status, 'pending')
+        )
+      )
+      .returning({ id: orders.id });
+
+    if (!updated) {
+      // Distinguish "not this user's order" (404) from "already transitioned" (409)
+      const [exists] = await db
+        .select({ id: orders.id })
+        .from(orders)
+        .where(and(eq(orders.id, orderId), eq(orders.userId, user.id)))
+        .limit(1);
+
+      if (!exists) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Order already submitted' }, { status: 409 });
+    }
 
     return NextResponse.json({ success: true });
   } catch (err) {

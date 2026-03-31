@@ -4,7 +4,7 @@ import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import QRCode from 'qrcode';
 import { Separator } from '@/components/ui/separator';
-import { getTelegramUser, hapticFeedback } from '@/lib/telegram';
+import { getTelegramUser, getInitData, hapticFeedback } from '@/lib/telegram';
 
 function CheckoutInner() {
   const router = useRouter();
@@ -43,8 +43,11 @@ function CheckoutInner() {
     try {
       await fetch(`/api/orders/${orderId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id, status: 'awaiting_payment' }),
+        headers: {
+          'Content-Type': 'application/json',
+          'x-telegram-init-data': getInitData(),
+        },
+        body: JSON.stringify({}),
       });
       setSubmitted(true);
       hapticFeedback('notification');

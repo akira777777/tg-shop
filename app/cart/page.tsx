@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { useCart } from '@/lib/cart-store';
 import { Separator } from '@/components/ui/separator';
-import { getTelegramUser } from '@/lib/telegram';
+import { getTelegramUser, getInitData } from '@/lib/telegram';
 import { useState } from 'react';
 
 export default function CartPage() {
@@ -25,11 +25,11 @@ export default function CartPage() {
     try {
       const res = await fetch('/api/orders', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-telegram-init-data': getInitData(),
+        },
         body: JSON.stringify({
-          userId: user.id,
-          firstName: user.first_name,
-          username: user.username,
           items: items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
         }),
       });

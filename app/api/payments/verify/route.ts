@@ -1,4 +1,5 @@
-import { checkPendingPayments } from '@/lib/tron/monitor';
+import { checkPendingPayments as checkTronPayments } from '@/lib/tron/monitor';
+import { checkPendingPayments as checkTonPayments } from '@/lib/ton/monitor';
 import { NextRequest, NextResponse } from 'next/server';
 
 // Called by Vercel Cron every minute — protected by CRON_SECRET
@@ -9,7 +10,7 @@ export async function GET(req: NextRequest): Promise<Response> {
   }
 
   try {
-    await checkPendingPayments();
+    await Promise.all([checkTronPayments(), checkTonPayments()]);
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error('[cron /api/payments/verify]', err);
