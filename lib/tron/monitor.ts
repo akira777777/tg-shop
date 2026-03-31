@@ -1,7 +1,7 @@
 import { db } from '@/lib/db';
 import { orders } from '@/lib/db/schema';
 import { eq, and, lt, isNull } from 'drizzle-orm';
-import { notifyPaymentConfirmed } from '@/lib/bot/notifications';
+import { notifyPaymentConfirmed, notifyOrderExpired } from '@/lib/bot/notifications';
 import { releaseAddress } from './pool';
 
 const USDT_CONTRACT =
@@ -75,7 +75,7 @@ export async function checkPendingPayments(): Promise<void> {
             console.error(`[tron-monitor] Failed to release address for order ${order.id}:`, err)
           );
           if (order.userId) {
-            await notifyPaymentConfirmed(order.userId, order.id, match.transaction_id);
+            await notifyPaymentConfirmed(order.userId, order.id, match.transaction_id, 'trc20');
           }
         }
       }
@@ -109,5 +109,9 @@ async function expireStaleOrders(): Promise<void> {
     await releaseAddress(order.paymentAddress).catch((err) =>
       console.error(`[tron-monitor] Failed to release address for expired order ${order.id}:`, err)
     );
+
+    if (order.userId) {
+      await notifyOrderExpired(order.userId, order.id);
+    }
   }
 }

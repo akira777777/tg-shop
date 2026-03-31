@@ -1,11 +1,8 @@
-import { webhookCallback } from 'grammy';
+import { after } from 'next/server';
 import { bot } from '@/lib/bot';
 
-// Grammy webhook handler — validated via WEBHOOK_SECRET token
-const handler = webhookCallback(bot, 'std/http', {
-  secretToken: process.env.WEBHOOK_SECRET,
-});
-
-export async function POST(req: Request): Promise<Response> {
-  return handler(req);
+export async function POST(request: Request): Promise<Response> {
+  return bot.webhooks.telegram(request, {
+    waitUntil: (task) => after(() => task),
+  });
 }

@@ -1,7 +1,7 @@
 import { db } from '@/lib/db';
 import { orders } from '@/lib/db/schema';
 import { eq, and, lt, isNull } from 'drizzle-orm';
-import { notifyPaymentConfirmed } from '@/lib/bot/notifications';
+import { notifyPaymentConfirmed, notifyOrderExpired } from '@/lib/bot/notifications';
 import { orderComment } from './price';
 
 const TON_WALLET = process.env.TON_WALLET_ADDRESS!;
@@ -82,7 +82,7 @@ export async function checkPendingPayments(): Promise<void> {
         .returning({ id: orders.id });
 
       if (updated.length > 0 && order.userId) {
-        await notifyPaymentConfirmed(order.userId, order.id, match.transaction_id.hash);
+        await notifyPaymentConfirmed(order.userId, order.id, match.transaction_id.hash, 'ton');
       }
     } catch (err) {
       console.error(`[ton-monitor] Failed to confirm order ${order.id}:`, err);
@@ -94,11 +94,21 @@ async function expireStaleOrders(): Promise<void> {
   const cutoff = new Date(Date.now() - ORDER_TTL_MINUTES * 60 * 1000);
 
   const stale = await db
-    .select({ id: orders.id })
+    .select({ id: orders.id, userId: orders.userId })
     .from(orders)
-    .where(and(eq(orders.status, 'awaiting_payment'), lt(orders.createdAt, cutoff)));
+    .where(
+      and(
+        eq(orders.status, 'awaiting_payment'),
+        eq(orders.paymentMethod, 'ton'),
+        lt(orders.createdAt, cutoff)
+      )
+    );
 
-  for (const { id } of stale) {
-    await db.update(orders).set({ status: 'cancelled' }).where(eq(orders.id, id));
+  for (const order of stale) {
+    await db.update(orders).set({ status: 'cancelled' }).where(eq(orders.id, order.id));
+
+    if (order.userId) {
+      await notifyOrderExpired(order.userId, order.id);
+    }
   }
 }

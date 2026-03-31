@@ -1,35 +1,42 @@
-import { InlineKeyboard } from 'grammy';
-import { bot } from './index';
-import { ADMIN_IDS } from './relay';
+import { ADMIN_IDS, MINI_APP_URL, tgSend } from './telegram-api';
 
-const MINI_APP_URL = process.env.TELEGRAM_MINI_APP_URL!;
+function explorerLink(txHash: string, paymentMethod: 'trc20' | 'ton'): string {
+  return paymentMethod === 'ton'
+    ? `https://tonscan.org/tx/${txHash}`
+    : `https://tronscan.org/#/transaction/${txHash}`;
+}
 
 export async function notifyPaymentConfirmed(
   userId: number,
   orderId: number,
-  txHash: string
+  txHash: string,
+  paymentMethod: 'trc20' | 'ton' = 'trc20',
 ): Promise<void> {
-  const keyboard = new InlineKeyboard().webApp('📦 Мои заказы', `${MINI_APP_URL}/orders`);
+  const network = paymentMethod === 'ton' ? 'TON' : 'TRC20 USDT';
+  const txUrl = explorerLink(txHash, paymentMethod);
 
-  await bot.api.sendMessage(
+  await tgSend(
     userId,
-    `✅ *Оплата подтверждена!*\n\nЗаказ *#${orderId}* успешно оплачен.\n\n` +
-      `TX: \`${txHash}\`\n\n` +
+    `✅ <b>Оплата подтверждена!</b>\n\n` +
+      `Заказ <b>#${orderId}</b> успешно оплачен через ${network}.\n\n` +
       `Ваш заказ передан в обработку. Используйте /status ${orderId} для отслеживания.`,
-    { parse_mode: 'Markdown', reply_markup: keyboard }
+    {
+      inline_keyboard: [
+        [{ text: '📦 Мои заказы', web_app: { url: `${MINI_APP_URL}/orders` } }],
+        [{ text: '🔗 Транзакция', url: txUrl }],
+      ],
+    },
   );
 
   const channelId = process.env.ADMIN_CHANNEL_ID;
   if (channelId) {
-    await bot.api.sendMessage(
+    await tgSend(
       channelId,
-      `💰 *Новый платёж получен*\n\nЗаказ *#${orderId}* · TX: \`${txHash}\``,
-      { parse_mode: 'Markdown' }
+      `💰 <b>Новый платёж получен</b>\n\nЗаказ <b>#${orderId}</b> · ${network} · <a href="${txUrl}">TX</a>`,
     );
   }
 }
 
-/** Notify all admins when a new order is placed. */
 export async function notifyNewOrder(params: {
   orderId: number;
   userId: number;
@@ -41,44 +48,50 @@ export async function notifyNewOrder(params: {
   const { orderId, userId, totalUsdt, itemCount, username, firstName } = params;
   const userLabel = username ? `@${username}` : (firstName ?? `#${userId}`);
 
-  const keyboard = new InlineKeyboard().text(`📝 Управлять #${orderId}`, `admin_order_${orderId}`);
   const text =
-    `🛒 *Новый заказ #${orderId}*\n\n` +
+    `🛒 <b>Новый заказ #${orderId}</b>\n\n` +
     `👤 Покупатель: ${userLabel}\n` +
     `💰 Сумма: $${totalUsdt} USDT\n` +
     `📦 Позиций: ${itemCount}`;
 
   await Promise.allSettled(
     ADMIN_IDS.map((adminId) =>
-      bot.api
-        .sendMessage(adminId, text, { parse_mode: 'Markdown', reply_markup: keyboard })
-        .catch((err) => console.error(`[notify] Could not reach admin ${adminId}:`, err))
-    )
+      tgSend(adminId, text, {
+        inline_keyboard: [
+          [{ text: `📝 Управлять #${orderId}`, callback_data: `admin_order_${orderId}` }],
+        ],
+      }).catch((err) => console.error(`[notify] Could not reach admin ${adminId}:`, err)),
+    ),
   );
 }
 
-const ORDER_STATUS_MESSAGES: Partial<Record<string, string>> = {
-  processing: '⚙️ Ваш заказ принят в обработку.',
-  shipped: '🚚 Ваш заказ отправлен!',
-  delivered: '📦 Ваш заказ доставлен! Спасибо за покупку.',
-  cancelled: '❌ Ваш заказ отменён. Обратитесь к менеджеру для уточнений.',
-  paid: '✅ Оплата подтверждена. Ваш заказ обрабатывается.',
-};
+export async function notifyOrderExpired(userId: number, orderId: number): Promise<void> {
+  await tgSend(
+    userId,
+    `⏳ <b>Время оплаты истекло</b>\n\nЗаказ <b>#${orderId}</b> отменён — адрес для оплаты больше не действителен.\n\nВы можете оформить новый заказ в каталоге.`,
+    { inline_keyboard: [[{ text: '🛍️ В каталог', web_app: { url: MINI_APP_URL } }]] },
+  ).catch((err) => console.error(`[notify] Failed to notify user ${userId} of expiry:`, err));
+}
 
-/** Notify a user when an admin changes their order status. */
 export async function notifyOrderStatusChanged(
   userId: number,
   orderId: number,
-  status: string
+  status: string,
 ): Promise<void> {
-  const msg = ORDER_STATUS_MESSAGES[status];
+  const messages: Partial<Record<string, string>> = {
+    processing: '⚙️ Ваш заказ принят в обработку.',
+    shipped: '🚚 Ваш заказ отправлен!',
+    delivered: '📦 Ваш заказ доставлен! Спасибо за покупку.',
+    cancelled: '❌ Ваш заказ отменён. Обратитесь к менеджеру для уточнений.',
+    paid: '✅ Оплата подтверждена. Ваш заказ обрабатывается.',
+  };
+  const msg = messages[status];
   if (!msg) return;
-  await bot.api
-    .sendMessage(userId, `${msg}\n\n*Заказ #${orderId}*`, { parse_mode: 'Markdown' })
-    .catch((err) => console.error(`[notify] Failed to notify user ${userId}:`, err));
+  await tgSend(userId, `${msg}\n\n<b>Заказ #${orderId}</b>`).catch((err) =>
+    console.error(`[notify] Failed to notify user ${userId}:`, err),
+  );
 }
 
-/** Notify all admins when a user submits a product suggestion. */
 export async function notifyNewSuggestion(params: {
   userId: number;
   productName: string;
@@ -90,16 +103,16 @@ export async function notifyNewSuggestion(params: {
   const userLabel = username ? `@${username}` : (firstName ?? `#${userId}`);
 
   const text =
-    `💡 *Новое предложение товара*\n\n` +
+    `💡 <b>Новое предложение товара</b>\n\n` +
     `👤 От: ${userLabel}\n` +
     `📦 Товар: ${productName}` +
     (description ? `\n📝 Описание: ${description}` : '');
 
   await Promise.allSettled(
     ADMIN_IDS.map((adminId) =>
-      bot.api
-        .sendMessage(adminId, text, { parse_mode: 'Markdown' })
-        .catch((err) => console.error(`[notify] Could not reach admin ${adminId}:`, err))
-    )
+      tgSend(adminId, text).catch((err) =>
+        console.error(`[notify] Could not reach admin ${adminId}:`, err),
+      ),
+    ),
   );
 }
