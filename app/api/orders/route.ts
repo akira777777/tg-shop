@@ -8,8 +8,11 @@ import { invalidateProductsCache } from '@/lib/products-cache';
 import { acquireAddress, releaseAddress } from '@/lib/tron/pool';
 import { getTonUsdPrice, usdtToTon, orderComment } from '@/lib/ton/price';
 import { verifyInitData } from '@/lib/telegram-auth';
+import { redis } from '@/lib/redis';
 
 const MICRO_USDT = BigInt(1_000_000);
+const ORDER_RATE_LIMIT = 5;   // max orders per window per user
+const ORDER_RATE_WINDOW = 60; // seconds
 
 const CreateOrderSchema = z.object({
   items: z
@@ -108,6 +111,17 @@ export async function POST(req: NextRequest): Promise<Response> {
   const user = verifyInitData(req.headers.get('x-telegram-init-data') ?? '');
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Rate limit: max ORDER_RATE_LIMIT orders per ORDER_RATE_WINDOW seconds per user
+  const rlKey = `ratelimit:orders:${user.id}`;
+  const count = await redis.incr(rlKey);
+  if (count === 1) await redis.expire(rlKey, ORDER_RATE_WINDOW);
+  if (count > ORDER_RATE_LIMIT) {
+    return NextResponse.json(
+      { error: 'Слишком много заявок. Попробуйте через минуту.' },
+      { status: 429 }
+    );
   }
 
   let body: unknown;

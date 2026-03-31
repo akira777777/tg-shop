@@ -29,6 +29,7 @@ export function ProductCard({ product }: { product: Product }) {
       name: product.name,
       priceUsdt: product.priceUsdt,
       imageUrl: product.imageUrl,
+      stock: product.stock,
     });
     hapticFeedback('impact');
   }
