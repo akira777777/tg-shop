@@ -12,9 +12,15 @@ function CheckoutInner() {
   const orderId = params.get('orderId');
   const address = params.get('address');
   const total = params.get('total');
+  const method = params.get('method') ?? 'trc20';
+  const tonAmount = params.get('tonAmount');
+  const comment = params.get('comment');
+
+  const isTon = method === 'ton';
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedComment, setCopiedComment] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -27,12 +33,11 @@ function CheckoutInner() {
     }
   }, [address]);
 
-  async function copyAddress() {
-    if (!address) return;
-    await navigator.clipboard.writeText(address);
-    setCopied(true);
+  async function copyToClipboard(text: string, setter: (v: boolean) => void) {
+    await navigator.clipboard.writeText(text);
+    setter(true);
     hapticFeedback('notification');
-    setTimeout(() => setCopied(false), 2000);
+    setTimeout(() => setter(false), 2000);
   }
 
   async function confirmPayment() {
@@ -66,6 +71,11 @@ function CheckoutInner() {
     );
   }
 
+  const displayAmount = isTon && tonAmount
+    ? `${parseFloat(tonAmount).toFixed(2)} TON`
+    : `${parseFloat(total).toFixed(2)} USDT`;
+  const networkLabel = isTon ? 'TON' : 'Tron (TRC20)';
+
   return (
     <div className="flex flex-col min-h-screen">
       <header className="sticky top-0 z-10 bg-background/90 backdrop-blur border-b px-4 py-3">
@@ -91,11 +101,17 @@ function CheckoutInner() {
             <div className="bg-muted/50 rounded-xl p-4 space-y-3">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Amount to send</span>
-                <span className="font-bold text-primary">{parseFloat(total).toFixed(2)} USDT</span>
+                <span className="font-bold text-primary">{displayAmount}</span>
               </div>
+              {isTon && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">USDT equivalent</span>
+                  <span className="font-medium">${parseFloat(total).toFixed(2)} USDT</span>
+                </div>
+              )}
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Network</span>
-                <span className="font-medium">Tron (TRC20)</span>
+                <span className="font-medium">{networkLabel}</span>
               </div>
             </div>
 
@@ -107,17 +123,52 @@ function CheckoutInner() {
                 {address}
               </p>
               <button
-                onClick={copyAddress}
+                onClick={() => copyToClipboard(address, setCopied)}
                 className="text-xs bg-secondary text-secondary-foreground px-4 py-2 rounded-full font-medium"
               >
                 {copied ? '✓ Copied!' : 'Copy address'}
               </button>
             </div>
 
+            {isTon && comment && (
+              <>
+                <Separator />
+                <div className="bg-blue-900/30 border border-blue-700/40 rounded-lg p-3 space-y-2">
+                  <p className="text-xs text-blue-200/80 font-medium">
+                    💬 You MUST include this comment in your transfer:
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 text-sm font-mono bg-background/50 rounded px-2 py-1 text-blue-100">
+                      {comment}
+                    </code>
+                    <button
+                      onClick={() => copyToClipboard(comment, setCopiedComment)}
+                      className="text-xs bg-secondary text-secondary-foreground px-3 py-1.5 rounded-full font-medium shrink-0"
+                    >
+                      {copiedComment ? '✓' : 'Copy'}
+                    </button>
+                  </div>
+                  <p className="text-xs text-blue-200/60">
+                    Without this comment, your payment cannot be matched to your order.
+                  </p>
+                </div>
+              </>
+            )}
+
             <div className="bg-yellow-900/30 border border-yellow-700/40 rounded-lg p-3">
               <p className="text-xs text-yellow-200/80">
-                ⚠️ Send <strong>exactly {parseFloat(total).toFixed(2)} USDT</strong> on the <strong>Tron (TRC20)</strong> network to this address.
-                Sending other tokens or on a different network will result in permanent loss.
+                {isTon ? (
+                  <>
+                    ⚠️ Send <strong>exactly {tonAmount ? parseFloat(tonAmount).toFixed(2) : '—'} TON</strong> to
+                    this address on the <strong>TON</strong> network with the comment above.
+                    Sending without the comment will result in a lost payment.
+                  </>
+                ) : (
+                  <>
+                    ⚠️ Send <strong>exactly {parseFloat(total).toFixed(2)} USDT</strong> on the <strong>Tron (TRC20)</strong> network to this address.
+                    Sending other tokens or on a different network will result in permanent loss.
+                  </>
+                )}
               </p>
             </div>
           </>

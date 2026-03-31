@@ -36,9 +36,12 @@ export function verifyInitData(initData: string): TelegramUser | null {
     const computed = crypto
       .createHmac('sha256', secretKey)
       .update(dataCheckString)
-      .digest('hex');
+      .digest();
 
-    if (computed !== hash) return null;
+    const hashBuf = Buffer.from(hash, 'hex');
+    if (computed.length !== hashBuf.length || !crypto.timingSafeEqual(computed, hashBuf)) {
+      return null;
+    }
 
     const userRaw = params.get('user');
     if (!userRaw) return null;

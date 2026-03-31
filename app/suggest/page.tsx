@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { getTelegramUser, hapticFeedback } from '@/lib/telegram';
+import { getTelegramUser, getInitData, hapticFeedback } from '@/lib/telegram';
 
 export default function SuggestPage() {
   const router = useRouter();
@@ -27,14 +27,11 @@ export default function SuggestPage() {
     try {
       const res = await fetch('/api/suggestions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user.id,
-          firstName: user.first_name,
-          username: user.username,
-          productName,
-          description,
-        }),
+        headers: {
+          'Content-Type': 'application/json',
+          'x-telegram-init-data': getInitData(),
+        },
+        body: JSON.stringify({ productName, description }),
       });
 
       if (!res.ok) {

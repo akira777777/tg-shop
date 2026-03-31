@@ -2,13 +2,17 @@ import { db } from '@/lib/db';
 import { products } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
-import { isAdmin } from '@/lib/admin-auth';
+import { verifyAdmin } from '@/lib/admin-auth';
 import { invalidateProductsCache } from '@/lib/products-cache';
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<Response> {
+  if (!verifyAdmin(req.headers.get('x-telegram-init-data') ?? '')) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   const { id } = await params;
   const productId = parseInt(id, 10);
   if (isNaN(productId)) {
@@ -16,7 +20,6 @@ export async function PATCH(
   }
 
   let body: {
-    adminId?: number;
     stock?: number;
     active?: boolean;
     name?: string;
@@ -31,10 +34,6 @@ export async function PATCH(
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  if (!body.adminId || !isAdmin(body.adminId)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
   const updates: Partial<{
     stock: number;
     active: boolean;
@@ -42,7 +41,7 @@ export async function PATCH(
     description: string;
     priceUsdt: string;
     category: string;
-    imageUrl: string;
+    imageUrl: string | null;
   }> = {};
   if (typeof body.stock === 'number') updates.stock = body.stock;
   if (typeof body.active === 'boolean') updates.active = body.active;
@@ -50,7 +49,7 @@ export async function PATCH(
   if (typeof body.description === 'string') updates.description = body.description;
   if (typeof body.priceUsdt === 'string' && body.priceUsdt) updates.priceUsdt = body.priceUsdt;
   if (typeof body.category === 'string' && body.category) updates.category = body.category;
-  if (typeof body.imageUrl === 'string') updates.imageUrl = body.imageUrl || undefined;
+  if (typeof body.imageUrl === 'string') updates.imageUrl = body.imageUrl || null;
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: 'No fields to update' }, { status: 400 });

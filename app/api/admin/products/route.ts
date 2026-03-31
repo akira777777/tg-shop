@@ -3,11 +3,10 @@ import { products } from '@/lib/db/schema';
 import { desc } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { isAdmin } from '@/lib/admin-auth';
+import { verifyAdmin } from '@/lib/admin-auth';
 import { invalidateProductsCache } from '@/lib/products-cache';
 
 const CreateProductSchema = z.object({
-  adminId: z.number().int(),
   name: z.string().min(1).max(200),
   description: z.string().max(1000).optional(),
   priceUsdt: z.string().min(1),
@@ -17,8 +16,7 @@ const CreateProductSchema = z.object({
 });
 
 export async function GET(req: NextRequest): Promise<Response> {
-  const rawId = req.nextUrl.searchParams.get('adminId');
-  if (!rawId || !isAdmin(parseInt(rawId, 10))) {
+  if (!verifyAdmin(req.headers.get('x-telegram-init-data') ?? '')) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -33,6 +31,10 @@ export async function GET(req: NextRequest): Promise<Response> {
 }
 
 export async function POST(req: NextRequest): Promise<Response> {
+  if (!verifyAdmin(req.headers.get('x-telegram-init-data') ?? '')) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   let body: unknown;
   try {
     body = await req.json();
@@ -45,10 +47,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 422 });
   }
 
-  const { adminId, name, description, priceUsdt, category, imageUrl, stock } = parsed.data;
-  if (!isAdmin(adminId)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const { name, description, priceUsdt, category, imageUrl, stock } = parsed.data;
 
   try {
     const [created] = await db

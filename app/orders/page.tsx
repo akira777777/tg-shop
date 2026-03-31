@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
-import { getTelegramUser } from '@/lib/telegram';
+import { getTelegramUser, getInitData } from '@/lib/telegram';
 
 interface OrderItem {
   name: string;
@@ -15,7 +15,9 @@ interface Order {
   id: number;
   status: string;
   totalUsdt: string;
+  paymentMethod: string;
   paymentAddress: string;
+  paymentAmountTon: string | null;
   txHash: string | null;
   createdAt: string;
   paidAt: string | null;
@@ -51,9 +53,11 @@ export default function OrdersPage() {
   useEffect(() => {
     if (!user) return;
 
-    fetch(`/api/orders?userId=${user.id}`)
+    fetch('/api/orders', {
+      headers: { 'x-telegram-init-data': getInitData() },
+    })
       .then((r) => r.json())
-      .then((data: Order[]) => setOrders(data))
+      .then((data: Order[]) => setOrders(Array.isArray(data) ? data : []))
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [user]);
@@ -119,11 +123,17 @@ export default function OrdersPage() {
               )}
               {order.status === 'awaiting_payment' && (
                 <button
-                  onClick={() =>
-                    router.push(
-                      `/checkout?orderId=${order.id}&address=${order.paymentAddress}&total=${order.totalUsdt}`
-                    )
-                  }
+                  onClick={() => {
+                    const p = new URLSearchParams({
+                      orderId: String(order.id),
+                      address: order.paymentAddress,
+                      total: order.totalUsdt,
+                      method: order.paymentMethod,
+                    });
+                    if (order.paymentAmountTon) p.set('tonAmount', order.paymentAmountTon);
+                    if (order.paymentMethod === 'ton') p.set('comment', `ORDER-${order.id}`);
+                    router.push(`/checkout?${p.toString()}`);
+                  }}
                   className="text-xs text-primary underline"
                 >
                   Show payment address

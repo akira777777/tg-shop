@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { getTelegramUser } from '@/lib/telegram';
+import { getTelegramUser, getInitData } from '@/lib/telegram';
 
 interface AdminOrder {
   id: number;
@@ -87,47 +87,51 @@ export default function AdminPage() {
     setAdminId(user.id);
   }, []);
 
-  const loadOrders = useCallback(async (id: number) => {
+  const authHeaders = useCallback(() => ({
+    'x-telegram-init-data': getInitData(),
+  }), []);
+
+  const loadOrders = useCallback(async () => {
     setOrdersLoading(true);
     try {
-      const res = await fetch(`/api/admin/orders?adminId=${id}`);
+      const res = await fetch('/api/admin/orders', { headers: authHeaders() });
       if (res.status === 401) { setUnauthorized(true); return; }
       setOrders(await res.json());
     } finally {
       setOrdersLoading(false);
     }
-  }, []);
+  }, [authHeaders]);
 
-  const loadProducts = useCallback(async (id: number) => {
+  const loadProducts = useCallback(async () => {
     setProductsLoading(true);
     try {
-      const res = await fetch(`/api/admin/products?adminId=${id}`);
+      const res = await fetch('/api/admin/products', { headers: authHeaders() });
       if (res.status === 401) { setUnauthorized(true); return; }
       setProducts(await res.json());
     } finally {
       setProductsLoading(false);
     }
-  }, []);
+  }, [authHeaders]);
 
-  const loadSuggestions = useCallback(async (id: number) => {
+  const loadSuggestions = useCallback(async () => {
     setSuggestionsLoading(true);
     try {
-      const res = await fetch(`/api/admin/suggestions?adminId=${id}`);
+      const res = await fetch('/api/admin/suggestions', { headers: authHeaders() });
       if (res.status === 401) { setUnauthorized(true); return; }
       setSuggestions(await res.json());
     } finally {
       setSuggestionsLoading(false);
     }
-  }, []);
+  }, [authHeaders]);
 
   // Load data once per tab activation
   useEffect(() => {
     if (!adminId) return;
     if (!loadedTabs.current.has(activeTab)) {
       loadedTabs.current.add(activeTab);
-      if (activeTab === 'orders') loadOrders(adminId);
-      if (activeTab === 'products') loadProducts(adminId);
-      if (activeTab === 'suggestions') loadSuggestions(adminId);
+      if (activeTab === 'orders') loadOrders();
+      if (activeTab === 'products') loadProducts();
+      if (activeTab === 'suggestions') loadSuggestions();
     }
   }, [adminId, activeTab, loadOrders, loadProducts, loadSuggestions]);
 
@@ -139,8 +143,8 @@ export default function AdminPage() {
     try {
       const res = await fetch(`/api/admin/orders/${orderId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ adminId, status: newStatus }),
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ status: newStatus }),
       });
       if (res.ok) {
         setOrders((prev) => prev.map((o) => o.id === orderId ? { ...o, status: newStatus } : o));
@@ -155,8 +159,8 @@ export default function AdminPage() {
     if (!adminId) return;
     const res = await fetch(`/api/admin/products/${productId}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ adminId, active }),
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ active }),
     });
     if (res.ok) {
       setProducts((prev) => prev.map((p) => p.id === productId ? { ...p, active } : p));
@@ -169,9 +173,8 @@ export default function AdminPage() {
     try {
       const res = await fetch(`/api/admin/products/${editingProduct.id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({
-          adminId,
           name: editingProduct.name,
           description: editingProduct.description ?? '',
           priceUsdt: editingProduct.priceUsdt,
@@ -196,9 +199,8 @@ export default function AdminPage() {
     try {
       const res = await fetch('/api/admin/products', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({
-          adminId,
           name: newProduct.name,
           description: newProduct.description || undefined,
           priceUsdt: newProduct.priceUsdt,
@@ -251,7 +253,7 @@ export default function AdminPage() {
           {/* ── ORDERS ── */}
           <TabsContent value="orders">
             <div className="flex justify-end mb-3">
-              <Button variant="outline" size="sm" onClick={() => loadOrders(adminId)}>
+              <Button variant="outline" size="sm" onClick={() => loadOrders()}>
                 🔄 Обновить
               </Button>
             </div>
@@ -314,7 +316,7 @@ export default function AdminPage() {
           {/* ── PRODUCTS ── */}
           <TabsContent value="products">
             <div className="flex justify-between mb-3">
-              <Button variant="outline" size="sm" onClick={() => loadProducts(adminId)}>
+              <Button variant="outline" size="sm" onClick={() => loadProducts()}>
                 🔄 Обновить
               </Button>
               <Button size="sm" onClick={() => setShowAddForm((v) => !v)}>
@@ -475,7 +477,7 @@ export default function AdminPage() {
           {/* ── SUGGESTIONS ── */}
           <TabsContent value="suggestions">
             <div className="flex justify-end mb-3">
-              <Button variant="outline" size="sm" onClick={() => loadSuggestions(adminId)}>
+              <Button variant="outline" size="sm" onClick={() => loadSuggestions()}>
                 🔄 Обновить
               </Button>
             </div>

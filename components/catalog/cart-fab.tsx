@@ -12,7 +12,7 @@ export function CartFab() {
 
   return (
     <Link href="/cart">
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
+      <div className="fixed left-1/2 -translate-x-1/2 z-50" style={{ bottom: 'calc(3.5rem + env(safe-area-inset-bottom) + 0.75rem)' }}>
         <div className="flex items-center gap-3 bg-primary text-primary-foreground rounded-full px-6 py-3 shadow-lg font-medium text-sm">
           <span>🛒 {count} item{count !== 1 ? 's' : ''}</span>
           <span className="opacity-70">·</span>

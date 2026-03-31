@@ -12,6 +12,7 @@ export default function CartPage() {
   const { items, updateQty, removeItem, total, clear } = useCart();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<'trc20' | 'ton'>('trc20');
 
   async function handleCheckout() {
     const user = getTelegramUser();
@@ -31,6 +32,7 @@ export default function CartPage() {
         },
         body: JSON.stringify({
           items: items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
+          paymentMethod,
         }),
       });
 
@@ -41,7 +43,15 @@ export default function CartPage() {
       }
 
       clear();
-      router.push(`/checkout?orderId=${data.orderId}&address=${data.paymentAddress}&total=${data.totalUsdt}`);
+      const checkoutParams = new URLSearchParams({
+        orderId: String(data.orderId),
+        address: data.paymentAddress,
+        total: data.totalUsdt,
+        method: data.paymentMethod,
+      });
+      if (data.paymentAmountTon) checkoutParams.set('tonAmount', data.paymentAmountTon);
+      if (data.comment) checkoutParams.set('comment', data.comment);
+      router.push(`/checkout?${checkoutParams.toString()}`);
     } catch {
       setError('Network error. Please try again.');
     } finally {
@@ -101,13 +111,37 @@ export default function CartPage() {
           <span>Total</span>
           <span>${total().toFixed(2)} USDT</span>
         </div>
+
+        <div className="flex gap-2">
+          <button
+            onClick={() => setPaymentMethod('trc20')}
+            className={`flex-1 text-xs rounded-lg py-2 font-medium border transition-colors ${
+              paymentMethod === 'trc20'
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'bg-background text-muted-foreground border-border'
+            }`}
+          >
+            💵 USDT (TRC20)
+          </button>
+          <button
+            onClick={() => setPaymentMethod('ton')}
+            className={`flex-1 text-xs rounded-lg py-2 font-medium border transition-colors ${
+              paymentMethod === 'ton'
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'bg-background text-muted-foreground border-border'
+            }`}
+          >
+            💎 TON
+          </button>
+        </div>
+
         {error && <p className="text-destructive text-sm">{error}</p>}
         <button
           onClick={handleCheckout}
           disabled={loading}
           className="w-full bg-primary text-primary-foreground rounded-lg py-3 text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
         >
-          {loading ? 'Creating order…' : 'Pay with USDT (TRC20)'}
+          {loading ? 'Creating order…' : `Pay with ${paymentMethod === 'ton' ? 'TON' : 'USDT (TRC20)'}`}
         </button>
       </div>
     </div>

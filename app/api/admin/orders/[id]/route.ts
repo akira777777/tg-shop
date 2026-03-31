@@ -2,7 +2,7 @@ import { db } from '@/lib/db';
 import { orders } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
-import { isAdmin } from '@/lib/admin-auth';
+import { verifyAdmin } from '@/lib/admin-auth';
 import { notifyOrderStatusChanged } from '@/lib/bot/notifications';
 
 const VALID_STATUSES = [
@@ -13,22 +13,23 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<Response> {
+  if (!verifyAdmin(req.headers.get('x-telegram-init-data') ?? '')) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   const { id } = await params;
   const orderId = parseInt(id, 10);
   if (isNaN(orderId)) {
     return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
   }
 
-  let body: { adminId?: number; status?: string };
+  let body: { status?: string };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  if (!body.adminId || !isAdmin(body.adminId)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
   if (!body.status || !VALID_STATUSES.includes(body.status)) {
     return NextResponse.json({ error: 'Invalid status' }, { status: 400 });
   }

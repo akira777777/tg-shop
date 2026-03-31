@@ -2,17 +2,20 @@ import { db } from '@/lib/db';
 import { suggestions, users } from '@/lib/db/schema';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { verifyInitData } from '@/lib/telegram-auth';
 import { notifyNewSuggestion } from '@/lib/bot/notifications';
 
 const SuggestionSchema = z.object({
-  userId: z.number().int(),
-  firstName: z.string().min(1),
-  username: z.string().optional(),
   productName: z.string().min(1).max(200),
   description: z.string().max(1000).optional(),
 });
 
 export async function POST(req: NextRequest): Promise<Response> {
+  const user = verifyInitData(req.headers.get('x-telegram-init-data') ?? '');
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   let body: unknown;
   try {
     body = await req.json();
@@ -25,18 +28,23 @@ export async function POST(req: NextRequest): Promise<Response> {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 422 });
   }
 
-  const { userId, firstName, username, productName, description } = parsed.data;
+  const { productName, description } = parsed.data;
 
   try {
     await db
       .insert(users)
-      .values({ telegramId: userId, firstName, username })
+      .values({ telegramId: user.id, firstName: user.first_name, username: user.username })
       .onConflictDoNothing();
 
-    await db.insert(suggestions).values({ userId, productName, description });
+    await db.insert(suggestions).values({ userId: user.id, productName, description });
 
-    notifyNewSuggestion({ userId, productName, description, username, firstName })
-      .catch((err) => console.error('[notify] Suggestion notification failed:', err));
+    notifyNewSuggestion({
+      userId: user.id,
+      productName,
+      description,
+      username: user.username,
+      firstName: user.first_name,
+    }).catch((err) => console.error('[notify] Suggestion notification failed:', err));
 
     return NextResponse.json({ success: true });
   } catch (err) {

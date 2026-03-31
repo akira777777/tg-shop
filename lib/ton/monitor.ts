@@ -29,7 +29,7 @@ export async function checkPendingPayments(): Promise<void> {
   const pending = await db
     .select()
     .from(orders)
-    .where(eq(orders.status, 'awaiting_payment'));
+    .where(and(eq(orders.status, 'awaiting_payment'), eq(orders.paymentMethod, 'ton')));
 
   if (pending.length === 0) return;
 

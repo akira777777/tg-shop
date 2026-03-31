@@ -2,11 +2,10 @@ import { db } from '@/lib/db';
 import { suggestions } from '@/lib/db/schema';
 import { desc } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
-import { isAdmin } from '@/lib/admin-auth';
+import { verifyAdmin } from '@/lib/admin-auth';
 
 export async function GET(req: NextRequest): Promise<Response> {
-  const rawId = req.nextUrl.searchParams.get('adminId');
-  if (!rawId || !isAdmin(parseInt(rawId, 10))) {
+  if (!verifyAdmin(req.headers.get('x-telegram-init-data') ?? '')) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
