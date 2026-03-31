@@ -49,7 +49,7 @@ declare global {
         requestFullscreen?: () => void;
         initData: string;
         initDataUnsafe: {
-          user?: { id: number; first_name: string; username?: string };
+          user?: { id: number; first_name: string; username?: string; language_code?: string };
         };
         HapticFeedback: {
           impactOccurred: (style: string) => void;

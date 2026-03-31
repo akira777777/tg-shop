@@ -2,18 +2,19 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useT, type TranslationKey } from '@/lib/i18n';
 
-const NAV_ITEMS = [
-  { href: '/', label: 'Каталог', icon: '🛍️' },
-  { href: '/cart', label: 'Корзина', icon: '🛒' },
-  { href: '/orders', label: 'Заказы', icon: '📦' },
-  { href: '/suggest', label: 'Идея', icon: '💡' },
+const NAV_ITEMS: { href: string; labelKey: TranslationKey; icon: string }[] = [
+  { href: '/', labelKey: 'nav.catalog', icon: '🛍️' },
+  { href: '/cart', labelKey: 'nav.cart', icon: '🛒' },
+  { href: '/orders', labelKey: 'nav.orders', icon: '📦' },
+  { href: '/suggest', labelKey: 'nav.idea', icon: '💡' },
 ];
 
 export function BottomNav() {
   const pathname = usePathname();
+  const t = useT();
 
-  // Don't show on admin, checkout, or product detail pages
   if (
     pathname.startsWith('/admin') ||
     pathname.startsWith('/checkout') ||
@@ -27,7 +28,7 @@ export function BottomNav() {
       className="fixed bottom-0 left-0 right-0 z-20 bg-background/90 backdrop-blur border-t flex"
       style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
-      {NAV_ITEMS.map(({ href, label, icon }) => {
+      {NAV_ITEMS.map(({ href, labelKey, icon }) => {
         const active = pathname === href;
         return (
           <Link
@@ -38,7 +39,7 @@ export function BottomNav() {
             }`}
           >
             <span className="text-lg leading-none">{icon}</span>
-            <span className={active ? 'font-medium' : ''}>{label}</span>
+            <span className={active ? 'font-medium' : ''}>{t(labelKey)}</span>
           </Link>
         );
       })}
