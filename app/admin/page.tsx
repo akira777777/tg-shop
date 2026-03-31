@@ -167,6 +167,23 @@ export default function AdminPage() {
     }
   };
 
+  const deleteProduct = async (productId: number) => {
+    if (!adminId || !confirm('Удалить товар?')) return;
+    const res = await fetch(`/api/admin/products/${productId}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    });
+    if (res.ok) {
+      const result = await res.json();
+      if (result.deleted) {
+        setProducts((prev) => prev.filter((p) => p.id !== productId));
+      } else {
+        // Had orders — was soft-deleted (deactivated)
+        setProducts((prev) => prev.map((p) => p.id === productId ? { ...p, active: false } : p));
+      }
+    }
+  };
+
   const saveEditProduct = async () => {
     if (!adminId || !editingProduct) return;
     setSavingEdit(true);
@@ -448,7 +465,7 @@ export default function AdminPage() {
                         <p className="text-xs text-muted-foreground">
                           {product.category} · В наличии: {product.stock}
                         </p>
-                        <div className="flex gap-2 justify-end pt-1">
+                        <div className="flex gap-2 justify-end pt-1 flex-wrap">
                           <Button
                             size="sm"
                             variant="outline"
@@ -464,6 +481,14 @@ export default function AdminPage() {
                             onClick={() => toggleProduct(product.id, !product.active)}
                           >
                             {product.active ? 'Деактивировать' : 'Активировать'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="text-xs"
+                            onClick={() => deleteProduct(product.id)}
+                          >
+                            Удалить
                           </Button>
                         </div>
                       </>

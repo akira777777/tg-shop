@@ -2,8 +2,8 @@ import { checkPendingPayments as checkTronPayments } from '@/lib/tron/monitor';
 import { checkPendingPayments as checkTonPayments } from '@/lib/ton/monitor';
 import { NextRequest, NextResponse } from 'next/server';
 
-// Called by Vercel Cron every minute — protected by CRON_SECRET
-export async function GET(req: NextRequest): Promise<Response> {
+// Called by Upstash QStash every minute — protected by CRON_SECRET
+export async function POST(req: NextRequest): Promise<Response> {
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret) {
     console.error('[cron] CRON_SECRET is not configured');

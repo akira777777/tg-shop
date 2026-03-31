@@ -18,6 +18,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="ru" className="dark" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground min-h-screen`}
+        suppressHydrationWarning
       >
         {/* Telegram Mini App SDK — beforeInteractive injects into the initial HTML */}
         <Script
