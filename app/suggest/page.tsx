@@ -58,7 +58,7 @@ export default function SuggestPage() {
         <p className="text-5xl">🎉</p>
         <h2 className="text-lg font-semibold">Thank you!</h2>
         <p className="text-sm text-muted-foreground">
-          Your suggestion has been received. We'll review it soon.
+          Your suggestion has been received. We&apos;ll review it soon.
         </p>
         <button onClick={() => router.push('/')} className="text-primary text-sm underline">
           Back to catalog

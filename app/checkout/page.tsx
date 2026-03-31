@@ -79,7 +79,7 @@ function CheckoutInner() {
             <p className="text-5xl">⏳</p>
             <h2 className="text-lg font-semibold">Waiting for confirmation</h2>
             <p className="text-sm text-muted-foreground">
-              We'll notify you in Telegram once we detect your payment.
+              We&apos;ll notify you in Telegram once we detect your payment.
               This usually takes 1–3 minutes.
             </p>
             <button onClick={() => router.push('/orders')} className="text-primary text-sm underline">
@@ -131,7 +131,7 @@ function CheckoutInner() {
             disabled={loading}
             className="w-full bg-primary text-primary-foreground rounded-lg py-3 text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
           >
-            {loading ? 'Confirming…' : "I've sent the payment"}
+            {loading ? 'Confirming…' : 'I\u0027ve sent the payment'}
           </button>
           <p className="text-center text-xs text-muted-foreground mt-2">
             We'll verify automatically. This just starts the watch.

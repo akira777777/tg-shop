@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
 import { getTelegramUser } from '@/lib/telegram';
@@ -46,12 +46,10 @@ export default function OrdersPage() {
   const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
-  const [noUser, setNoUser] = useState(false);
+  const user = useMemo(() => getTelegramUser(), []);
 
   useEffect(() => {
-    const user = getTelegramUser();
     if (!user) {
-      setNoUser(true);
       setLoading(false);
       return;
     }
@@ -61,7 +59,7 @@ export default function OrdersPage() {
       .then((data: Order[]) => setOrders(data))
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  }, [user]);
 
   if (loading) {
     return (
@@ -71,7 +69,7 @@ export default function OrdersPage() {
     );
   }
 
-  if (noUser) {
+  if (!user) {
     return (
       <div className="flex items-center justify-center h-screen">
         <p className="text-muted-foreground">Open this in Telegram to see your orders.</p>

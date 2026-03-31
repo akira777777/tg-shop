@@ -1,6 +1,6 @@
 import { Actions, Button, Card, CardText, LinkButton } from 'chat';
 import type { Chat, Thread } from 'chat';
-import { and, desc, eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { messages as messagesTable, orderItems, orders, products, users } from '@/lib/db/schema';
 import { notifyOrderStatusChanged } from './notifications';
@@ -70,7 +70,7 @@ async function upsertUser(
 }
 
 async function relayToAdmins(
-  bot: Chat<any, ThreadState>,
+  bot: Chat<never, ThreadState>,
   userId: number,
   userLabel: string,
   text: string,
@@ -120,7 +120,7 @@ async function handleStatus(
   });
 }
 
-export function registerBotHandlers(bot: Chat<any, ThreadState>): void {
+export function registerBotHandlers(bot: Chat<never, ThreadState>): void {
   // ── New DM (first contact, thread not yet subscribed) ─────────────────────
   bot.onDirectMessage(async (thread, message) => {
     const authorId = parseInt(message.author.userId);
