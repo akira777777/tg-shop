@@ -24,6 +24,12 @@ DATABASE_URL='postgresql://...' npm run db:push
 
 No test suite is configured.
 
+## Key Library Notes
+
+- **UI components**: `@base-ui/react` (headless, Radix/MUI lineage) — **not shadcn/ui**. Custom wrappers live in `components/ui/`. Do not assume shadcn primitives or `cn()` utilities exist.
+- **Zod v4** (`^4.3.6`): Error shape API differs from v3. Use `.flatten()` from `z.ZodError` — `error.flatten()` returns `{ formErrors, fieldErrors }` as in v3, but import paths changed. Use `import { z } from 'zod'` (not `zod/v3`).
+- **Tailwind CSS v4**: Config uses `@tailwindcss/postcss`, not the v3 `tailwind.config.js` approach.
+
 ## Architecture
 
 This is a **Telegram Mini App** e-commerce store with crypto payments. It runs as Next.js 16 App Router deployed on Vercel, embedded inside Telegram via the WebApp SDK. The UI language is Russian.
@@ -58,20 +64,21 @@ TRC20 uses idempotency on `txHash IS NULL` before marking paid. Both monitors ca
 | `catalog:products` | 5 min | Product list (`lib/products-cache.ts`); invalidated on any admin product write **and** on new order creation (stock changes) |
 | `tron:pool:available` | permanent | Redis set of available TRC20 deposit addresses |
 | `ton:usd_price` | 5 min | TON/USD rate from CoinGecko |
+| `ratelimit:orders:{userId}` | 60 s | Order creation rate limit counter — max 5 orders per 60 s per user (set on first hit via `INCR`/`EXPIRE`) |
 
 ### Telegram Bot (Chat SDK)
 
 The bot uses Vercel's **Chat SDK** (`chat` + `@chat-adapter/telegram` + `@chat-adapter/state-redis`).
 
-- **Singleton**: `lib/bot/index.ts` — creates the `Chat` instance, registers handlers, exported as `bot`.
-- **Webhook**: `app/api/telegram/webhook/route.ts` — `POST` handler calls `bot.webhooks.telegram(request)` using `after()` for background processing.
+- **Singleton**: `lib/bot/index.ts` — lazy init via `getBot()` (not a direct `bot` export). `getBot()` creates the `Chat` instance on first call and caches it in a module-level variable.
+- **Webhook**: `app/api/telegram/webhook/route.ts` — `POST` handler calls `getBot().webhooks.telegram(request, { waitUntil: (task) => after(() => task) })`. Uses Next.js `after()` (not `waitUntil` directly) so the response returns immediately while bot logic runs post-response.
 - **Handlers**: `lib/bot/handlers.ts` — all bot logic in `registerBotHandlers()`:
   - `onDirectMessage` — `/start` welcome, `/status <id>` order lookup, user↔admin message relay.
   - `onSubscribedMessage` — same commands on already-subscribed threads, plus admin reply flow (thread state stores `pendingUserId`).
   - `onAction` — inline button callbacks: `my_orders`, `contact_manager`, `suggest_product`, `admin_dialogs`, `admin_orders`, `reply_to:<id>`, `admin_order_<id>`, `set_status_<id>_<status>`.
 - **Raw API fallback**: `lib/bot/telegram-api.ts` — `tgSend()` uses direct Telegram Bot API for `web_app` buttons and HTML parse mode, which Chat SDK doesn't expose.
 - **Notifications**: `lib/bot/notifications.ts` — `notifyPaymentConfirmed`, `notifyNewOrder`, `notifyOrderExpired`, `notifyOrderStatusChanged`, `notifyNewSuggestion`. All use `tgSend()`.
-- **Local dev**: `bot-poll.ts` creates a separate `Chat` instance in polling mode (`mode: 'polling'`, `deleteWebhook: true`).
+- **Local dev**: `bot-poll.ts` (repo root) creates a **separate** `Chat` instance in polling mode (`mode: 'polling'`, `deleteWebhook: true`). It does not reuse `getBot()` from `lib/bot/index.ts`.
 
 Thread state type: `{ pendingUserId?: number; pendingUserLabel?: string }` — used for the admin reply-to-user flow.
 
@@ -112,6 +119,10 @@ Two separate Redis connections are used:
 ### Telegram WebApp Initialization
 
 `components/telegram-init.tsx` (rendered in root layout) calls `WebApp.ready()`, `WebApp.expand()`, and optionally `WebApp.requestFullscreen()` (guarded to Telegram client v7+). It also reads `language_code` from `initDataUnsafe` to set the i18n locale. The Telegram SDK script (`telegram-web-app.js`) is loaded with `strategy="beforeInteractive"` in the root layout.
+
+### Security Headers (`next.config.ts`)
+
+`X-Frame-Options` is intentionally **absent** — setting it would break Telegram's iframe embedding of the Mini App. The config sets `nosniff`, referrer policy, and permissions policy, but deliberately omits framing restrictions. Do not add `X-Frame-Options` or `frame-ancestors` CSP. `poweredByHeader: false` removes the `X-Powered-By: Next.js` header. `images.remotePatterns` allows any HTTPS hostname (product images can be hosted anywhere).
 
 ## Key Environment Variables
 
