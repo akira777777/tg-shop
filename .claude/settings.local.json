@@ -14,7 +14,9 @@
       "Bash(cat:*)",
       "Bash(wc -l app/api/**/*.ts lib/**/*.ts)",
       "Bash(npx tsc:*)",
-      "mcp__ruflo__system_status"
+      "mcp__ruflo__system_status",
+      "mcp__claude_ai_Context7__resolve-library-id",
+      "mcp__claude_ai_Context7__query-docs"
     ]
   }
 }

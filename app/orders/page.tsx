@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getTelegramUser, getInitData } from '@/lib/telegram';
+import { useTelegramBackButton } from '@/lib/use-telegram-nav';
 import { orderComment } from '@/lib/ton/shared';
 
 interface OrderItem { name: string; quantity: number; priceUsdt: string }
@@ -30,6 +31,7 @@ const STATUS_STYLE: Record<string, { bg: string; text: string; label: string }> 
 };
 
 export default function OrdersPage() {
+  useTelegramBackButton();
   const router = useRouter();
   const user = useMemo(() => getTelegramUser(), []);
   const [orders, setOrders] = useState<Order[]>([]);

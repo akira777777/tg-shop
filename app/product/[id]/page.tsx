@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { useParams, useRouter } from 'next/navigation';
 import { useCart } from '@/lib/cart-store';
 import { hapticFeedback } from '@/lib/telegram';
+import { useTelegramBackButton } from '@/lib/use-telegram-nav';
 import { useT } from '@/lib/i18n';
 
 interface Product {
@@ -18,6 +19,7 @@ interface Product {
 }
 
 export default function ProductPage() {
+  useTelegramBackButton();
   const t = useT();
   const params = useParams<{ id: string }>();
   const router = useRouter();

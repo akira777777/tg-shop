@@ -2,10 +2,10 @@
 
 import { useEffect } from "react";
 import { detectLocale, useLocale } from "@/lib/i18n";
+import { setHeaderColor, setBackgroundColor } from "@/lib/telegram";
 
 /**
- * Calls Telegram WebApp.ready() and expand() once the client has mounted.
- * Also detects user locale from Telegram and sets it in the i18n store.
+ * Initializes Telegram WebApp SDK: ready(), expand(), theme colors, locale.
  */
 export function TelegramInit() {
   const setLocale = useLocale((s) => s.setLocale);
@@ -15,6 +15,10 @@ export function TelegramInit() {
       const twa = window.Telegram.WebApp;
       twa.ready();
       twa.expand();
+
+      // Set header/background to match our dark theme
+      setHeaderColor("secondary_bg_color");
+      setBackgroundColor("#1f1b2e");
     }
     setLocale(detectLocale());
   }, [setLocale]);

@@ -5,8 +5,10 @@ import { useRouter } from 'next/navigation';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { getTelegramUser, getInitData, hapticFeedback } from '@/lib/telegram';
+import { useTelegramBackButton } from '@/lib/use-telegram-nav';
 
 export default function SuggestPage() {
+  useTelegramBackButton();
   const router = useRouter();
   const [productName, setProductName] = useState('');
   const [description, setDescription] = useState('');

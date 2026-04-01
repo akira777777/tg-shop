@@ -4,9 +4,11 @@ import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { useCart } from '@/lib/cart-store';
 import { getTelegramUser, getInitData } from '@/lib/telegram';
+import { useTelegramBackButton } from '@/lib/use-telegram-nav';
 import { useState } from 'react';
 
 export default function CartPage() {
+  useTelegramBackButton();
   const router = useRouter();
   const { items, updateQty, total, clear } = useCart();
   const [loading, setLoading] = useState(false);

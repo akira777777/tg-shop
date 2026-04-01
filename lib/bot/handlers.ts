@@ -131,6 +131,67 @@ async function handleStatus(
   });
 }
 
+async function handleOrders(userId: number): Promise<void> {
+  const userOrders = await db
+    .select()
+    .from(orders)
+    .where(eq(orders.userId, userId))
+    .orderBy(desc(orders.createdAt))
+    .limit(5);
+
+  if (!userOrders.length) {
+    await tgSend(userId, '📭 У вас пока нет заказов.', {
+      inline_keyboard: [
+        [{ text: '🛍️ Открыть каталог', web_app: { url: MINI_APP_URL } }],
+      ],
+    });
+    return;
+  }
+
+  const lines = userOrders.map(
+    (o) => `${STATUS_EMOJI[o.status] ?? '❓'} <b>#${o.id}</b> — ${o.status.replaceAll('_', ' ')} — $${o.totalUsdt} USDT`,
+  );
+  await tgSend(
+    userId,
+    `📦 <b>Ваши последние заказы:</b>\n\n${lines.join('\n')}\n\nИспользуйте /status &lt;номер&gt; для деталей.`,
+    {
+      inline_keyboard: [
+        [{ text: '📋 Все заказы', web_app: { url: `${MINI_APP_URL}/orders` } }],
+      ],
+    },
+  );
+}
+
+async function handleHelp(userId: number, isAdmin: boolean): Promise<void> {
+  const userHelp =
+    `ℹ️ <b>Как пользоваться магазином:</b>\n\n` +
+    `🛍️ Нажмите <b>Меню</b> внизу чата → откроется каталог\n` +
+    `🛒 Добавьте товары в корзину → оформите заказ\n` +
+    `💳 Оплатите USDT (TRC20) или TON\n` +
+    `⏳ Бот уведомит вас, когда оплата подтверждена\n\n` +
+    `<b>Команды:</b>\n` +
+    `/start — Главное меню\n` +
+    `/orders — Мои заказы\n` +
+    `/status &lt;номер&gt; — Статус заказа\n` +
+    `/help — Помощь\n\n` +
+    `💬 Для связи с менеджером — просто напишите сообщение.`;
+
+  const adminHelp =
+    `👑 <b>Панель администратора:</b>\n\n` +
+    `💬 <b>Диалоги</b> — просмотр сообщений от пользователей\n` +
+    `📦 <b>Заказы</b> — управление статусами\n\n` +
+    `Для ответа пользователю нажмите <b>«Ответить»</b> рядом с его сообщением.\n\n` +
+    `/start — Панель администратора\n` +
+    `/orders — Все заказы\n` +
+    `/status &lt;номер&gt; — Детали заказа`;
+
+  await tgSend(userId, isAdmin ? adminHelp : userHelp, {
+    inline_keyboard: [
+      [{ text: '🛍️ Открыть каталог', web_app: { url: MINI_APP_URL } }],
+    ],
+  });
+}
+
 export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadState>): void {
   // ── New DM (first contact, thread not yet subscribed) ─────────────────────
   bot.onDirectMessage(async (thread, message) => {
@@ -152,6 +213,16 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
 
     if (msgText.startsWith('/status')) {
       await handleStatus(thread, msgText, authorId);
+      return;
+    }
+
+    if (msgText.startsWith('/orders')) {
+      await handleOrders(authorId);
+      return;
+    }
+
+    if (msgText.startsWith('/help')) {
+      await handleHelp(authorId, isAdmin);
       return;
     }
 
@@ -182,6 +253,16 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
 
     if (msgText.startsWith('/status')) {
       await handleStatus(thread, msgText, authorId);
+      return;
+    }
+
+    if (msgText.startsWith('/orders')) {
+      await handleOrders(authorId);
+      return;
+    }
+
+    if (msgText.startsWith('/help')) {
+      await handleHelp(authorId, isAdmin);
       return;
     }
 
