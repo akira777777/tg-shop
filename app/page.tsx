@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { ProductCard } from '@/components/catalog/product-card';
+import { ProductCard, ProductCardSkeleton } from '@/components/catalog/product-card';
 import { CartFab } from '@/components/catalog/cart-fab';
 import { Input } from '@/components/ui/input';
+import { useT } from '@/lib/i18n';
 
 interface Product {
   id: number;
@@ -17,6 +17,7 @@ interface Product {
 }
 
 export default function CatalogPage() {
+  const t = useT();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -56,57 +57,74 @@ export default function CatalogPage() {
     [products, activeTab, search]
   );
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <p className="text-muted-foreground animate-pulse">Загрузка каталога…</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <p className="text-red-400 text-sm text-center px-4">{error}</p>
-      </div>
-    );
-  }
-
   return (
     <div className="pb-24">
-      <header className="sticky top-0 z-10 bg-background/90 backdrop-blur border-b px-4 py-3 space-y-2">
-        <h1 className="text-lg font-semibold tracking-tight">🛍️ Каталог</h1>
-        <Input
-          placeholder="Поиск товаров…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="h-8 text-sm"
-        />
+      {/* Header */}
+      <header className="sticky top-0 z-10 glass border-b border-border/50 px-4 py-3 space-y-3">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-bold tracking-tight">{t('catalog.title')}</h1>
+          {!loading && (
+            <span className="text-xs text-muted-foreground">{filtered.length} товаров</span>
+          )}
+        </div>
+        <div className="relative">
+          <Input
+            placeholder={t('catalog.search')}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-9 text-sm bg-muted/50 border-border/50 rounded-xl pl-9"
+          />
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">🔍</span>
+        </div>
       </header>
 
-      <div className="px-4 pt-4">
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="flex gap-1 overflow-x-auto w-full justify-start h-auto flex-wrap bg-transparent p-0">
-            {categories.map((cat) => (
-              <TabsTrigger key={cat} value={cat} className="text-xs rounded-full">
-                {cat}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+      {/* Error */}
+      {error && (
+        <div className="flex items-center justify-center h-64">
+          <p className="text-destructive text-sm text-center px-4">{error}</p>
+        </div>
+      )}
 
+      <div className="px-4 pt-3">
+        {/* Category pills */}
+        <div className="flex gap-2 overflow-x-auto pb-3 scrollbar-hide -mx-4 px-4">
           {categories.map((cat) => (
-            <TabsContent key={cat} value={cat} className="mt-3">
-              <div className="grid grid-cols-2 gap-3">
-                {filtered.map((p) => (
-                  <ProductCard key={p.id} product={p} />
-                ))}
-              </div>
-              {filtered.length === 0 && (
-                <p className="text-center text-muted-foreground py-12">Товаров пока нет.</p>
-              )}
-            </TabsContent>
+            <button
+              key={cat}
+              onClick={() => setActiveTab(cat)}
+              className={`shrink-0 text-xs font-medium rounded-full px-4 py-1.5 transition-all duration-200 ${
+                activeTab === cat
+                  ? 'bg-primary text-primary-foreground glow-sm'
+                  : 'bg-muted/60 text-muted-foreground hover:bg-muted'
+              }`}
+            >
+              {cat}
+            </button>
           ))}
-        </Tabs>
+        </div>
+
+        {/* Product grid */}
+        {loading ? (
+          <div className="grid grid-cols-2 gap-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <ProductCardSkeleton key={i} />
+            ))}
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              {filtered.map((p) => (
+                <ProductCard key={p.id} product={p} />
+              ))}
+            </div>
+            {filtered.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-16 gap-3">
+                <span className="text-4xl">🔍</span>
+                <p className="text-muted-foreground text-sm">{t('catalog.empty')}</p>
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       <CartFab />
