@@ -21,13 +21,15 @@ export default function ProductPage() {
   const inCart = cartItems.find((i) => i.productId === Number(params.id));
 
   useEffect(() => {
-    fetch(`/api/products/${params.id}`)
+    const controller = new AbortController();
+    fetch(`/api/products/${params.id}`, { signal: controller.signal })
       .then(async (r) => {
         if (r.status === 404) { setProduct(null); return; }
         setProduct(await r.json());
       })
-      .catch(() => setProduct(null))
+      .catch((err) => { if (err.name !== 'AbortError') setProduct(null); })
       .finally(() => setLoading(false));
+    return () => controller.abort();
   }, [params.id]);
 
   if (loading) {
@@ -78,7 +80,7 @@ export default function ProductPage() {
       {/* Hero image */}
       {product.imageUrl ? (
         <div className="relative w-full aspect-square">
-          <Image src={product.imageUrl} alt={product.name} fill className="object-cover" unoptimized />
+          <Image src={product.imageUrl} alt={product.name} fill sizes="100vw" priority className="object-cover" />
           <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent" />
         </div>
       ) : (

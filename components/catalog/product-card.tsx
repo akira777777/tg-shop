@@ -36,8 +36,8 @@ export function ProductCard({ product }: { product: Product }) {
               src={product.imageUrl}
               alt={product.name}
               fill
+              sizes="50vw"
               className="object-cover group-hover:scale-105 transition-transform duration-500"
-              unoptimized
             />
           ) : (
             <div className="w-full h-full bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center text-4xl">
