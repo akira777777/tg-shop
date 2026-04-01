@@ -1,0 +1,19 @@
+{
+  "agents": {
+    "programist-1": {
+      "agentId": "programist-1",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "sonnet"
+      },
+      "createdAt": "2026-04-01T03:21:55.015Z",
+      "domain": "typescript",
+      "model": "sonnet",
+      "modelRoutedBy": "explicit"
+    }
+  },
+  "version": "3.0.0"
+}

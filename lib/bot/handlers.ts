@@ -8,6 +8,10 @@ import { ADMIN_IDS, MINI_APP_URL, tgSend } from './telegram-api';
 import { releaseAddress } from '@/lib/tron/pool';
 import { invalidateProductsCache } from '@/lib/products-cache';
 
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 const STATUS_EMOJI: Record<string, string> = {
   pending: '🕐',
   awaiting_payment: '💳',
@@ -73,25 +77,29 @@ async function upsertUser(
 }
 
 async function relayToAdmins(
-  bot: Chat<Record<string, Adapter>, ThreadState>,
+  _bot: Chat<Record<string, Adapter>, ThreadState>,
   userId: number,
   userLabel: string,
   text: string,
 ): Promise<void> {
-  for (const adminId of ADMIN_IDS) {
-    try {
-      const dm = await bot.openDM(String(adminId));
-      await dm.subscribe();
-      await dm.post(
-        Card({
-          children: [
-            CardText(`📨 Сообщение от ${userLabel}\n\n${text}`),
-            Actions([Button({ id: `reply_to:${userId}`, label: '💬 Ответить' })]),
+  // Use raw Telegram API instead of Chat SDK openDM().post() —
+  // openDM is unreliable across cold starts in serverless.
+  const results = await Promise.allSettled(
+    ADMIN_IDS.map((adminId) =>
+      tgSend(
+        adminId,
+        `📨 <b>Сообщение от ${escapeHtml(userLabel)}</b>\n\n${escapeHtml(text)}`,
+        {
+          inline_keyboard: [
+            [{ text: '💬 Ответить', callback_data: `reply_to:${userId}` }],
           ],
-        }),
-      );
-    } catch (err) {
-      console.error(`[relay] Could not reach admin ${adminId}:`, err);
+        },
+      ),
+    ),
+  );
+  for (const r of results) {
+    if (r.status === 'rejected') {
+      console.error('[relay] Could not reach admin:', r.reason);
     }
   }
 }
@@ -189,17 +197,27 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
         const { pendingUserId, pendingUserLabel } = state;
         await thread.setState({});
         try {
-          const dm = await bot.openDM(String(pendingUserId));
-          await dm.post({ markdown: `💬 **Менеджер:**\n\n${msgText}` });
+          // Use raw Telegram API (tgSend) instead of Chat SDK openDM().post() —
+          // openDM is unreliable in serverless because it depends on Chat SDK
+          // thread state being properly initialized across cold starts.
+          await tgSend(
+            pendingUserId,
+            `💬 <b>Ответ менеджера:</b>\n\n${escapeHtml(msgText)}`,
+          );
           await thread.post(`✅ Ответ отправлен — ${pendingUserLabel}.`);
           await db
             .insert(messagesTable)
             .values({ userId: pendingUserId, direction: 'admin_to_user', content: msgText })
             .catch((err) => console.error('[relay] DB insert failed:', err));
-        } catch {
+        } catch (err) {
+          console.error('[relay] Failed to deliver admin reply:', err);
           await thread.post('❌ Не удалось доставить сообщение пользователю.');
         }
+        return;
       }
+
+      // No pending reply target — show admin panel so admin knows how to proceed
+      await sendAdminPanel(authorId);
       return;
     }
 

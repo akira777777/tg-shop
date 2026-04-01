@@ -51,6 +51,8 @@ Two blockchains are supported:
 - **TRC20 USDT** — A pool of pre-funded deposit addresses is seeded from `TRON_DEPOSIT_ADDRESS_POOL` (comma-separated) into a Redis set (`tron:pool:available`). `lib/tron/pool.ts` atomically pops one address per order (`acquireAddress`) and returns it after payment or expiry (`releaseAddress`).
 - **TON** — A single wallet (`TON_WALLET_ADDRESS`) receives all TON payments. Orders are distinguished by a comment in the format `ORDER-{id}`. The TON amount is converted from USDT using a CoinGecko price (cached in Redis as `ton:usd_price`, 5-min TTL). Payments allow up to 1% underpayment to handle price drift.
 
+**TON client-safe utilities**: `lib/ton/shared.ts` exports `orderComment(id)`, `usdtToTon(usdt, price)`, and `toNanoton(ton)`. It has **no server-side imports** and is safe to use in both server and client components. The monitors in `lib/ton/monitor.ts` and the checkout page both import from here.
+
 Payment verification runs every minute via **Upstash QStash** (not a Vercel cron — Hobby plan only allows daily). QStash calls `POST /api/payments/verify` with `Authorization: Bearer <CRON_SECRET>`. Both monitors run in parallel, first expiring stale `awaiting_payment` orders (returning TRC20 addresses to the pool), then polling their respective chain APIs. `vercel.json` is intentionally empty (`{}`).
 
 To set up the QStash schedule: create a schedule in the Upstash console (or via API) with `rate: every 1 minute`, target URL `https://<your-domain>/api/payments/verify`, and header `Authorization: Bearer <CRON_SECRET>`.
@@ -118,6 +120,8 @@ A single `@upstash/redis` REST client (`UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS
 
 `UPSTASH_REDIS_URL` (`rediss://...`) is **no longer used**.
 
+> **DEPLOY.md is partially stale**: It lists `UPSTASH_REDIS_URL` as a required variable and describes `vercel.json` cron config — both are outdated. The current setup uses only the REST client (`UPSTASH_REDIS_REST_URL`/`_TOKEN`) and QStash for scheduling. Ignore those sections in `DEPLOY.md`.
+
 ### Path Alias
 
 `@/*` maps to the project root (configured in `tsconfig.json`). All internal imports use `@/lib/...`, `@/components/...`, etc.
@@ -135,6 +139,12 @@ Order creation (`POST /api/orders`) uses two atomicity patterns:
 ### Security Headers (`next.config.ts`)
 
 `X-Frame-Options` is intentionally **absent** — setting it would break Telegram's iframe embedding of the Mini App. The config sets `nosniff`, referrer policy, and permissions policy, but deliberately omits framing restrictions. Do not add `X-Frame-Options` or `frame-ancestors` CSP. `poweredByHeader: false` removes the `X-Powered-By: Next.js` header. `images.remotePatterns` allows any HTTPS hostname (product images can be hosted anywhere).
+
+### GitHub Actions
+
+Two workflows in `.github/workflows/`:
+- `claude.yml` — triggers Claude Code on `@claude` mentions in issues, PRs, and review comments. Requires `CLAUDE_CODE_OAUTH_TOKEN` secret.
+- `claude-code-review.yml` — automated code review on PRs.
 
 ## Key Environment Variables
 

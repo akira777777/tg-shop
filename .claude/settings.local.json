@@ -13,7 +13,8 @@
       "Bash(cat app/api/admin/products/[id]/route.ts)",
       "Bash(cat:*)",
       "Bash(wc -l app/api/**/*.ts lib/**/*.ts)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "mcp__ruflo__system_status"
     ]
   }
 }
