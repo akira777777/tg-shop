@@ -81,6 +81,7 @@ export const messages = pgTable(
   },
   (t) => ({
     directionIdx: index('messages_direction_idx').on(t.direction),
+    userIdIdx: index('messages_user_id_idx').on(t.userId),
   })
 );
 

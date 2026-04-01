@@ -13,6 +13,7 @@ const TOLERANCE_DIVISOR = BigInt(100);
 
 interface TonCenterTx {
   transaction_id: { hash: string };
+  utime: number; // Unix timestamp in seconds
   in_msg: {
     value?: string;   // nanotons as string
     message?: string; // decoded text comment
@@ -74,11 +75,21 @@ export async function checkPendingPayments(): Promise<void> {
     const expectedComment = orderComment(order.id);
     const expectedNano = BigInt(Math.round(parseFloat(order.paymentAmountTon) * 1_000_000_000));
 
+    // Only consider transactions that arrived AFTER this order was created,
+    // preventing old replay attacks on the shared TON wallet address.
+    const orderCreatedSec = order.createdAt
+      ? Math.floor(new Date(order.createdAt).getTime() / 1000)
+      : 0;
+
     const match = txs.find((tx) => {
       const comment = tx.in_msg.message ?? '';
       const value = BigInt(tx.in_msg.value ?? '0');
-      // comment must match exactly; value must be within tolerance
-      return comment === expectedComment && value >= (expectedNano * TOLERANCE_BPS) / TOLERANCE_DIVISOR;
+      // comment must match exactly; value must be within tolerance; tx must post-date order
+      return (
+        comment === expectedComment &&
+        value >= (expectedNano * TOLERANCE_BPS) / TOLERANCE_DIVISOR &&
+        tx.utime >= orderCreatedSec
+      );
     });
 
     if (!match) continue;

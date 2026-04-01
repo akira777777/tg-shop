@@ -1,6 +1,7 @@
 import { checkPendingPayments as checkTronPayments } from '@/lib/tron/monitor';
 import { checkPendingPayments as checkTonPayments } from '@/lib/ton/monitor';
 import { NextRequest, NextResponse } from 'next/server';
+import { timingSafeEqual } from 'crypto';
 
 // Called by Upstash QStash every minute — protected by CRON_SECRET
 export async function POST(req: NextRequest): Promise<Response> {
@@ -10,8 +11,15 @@ export async function POST(req: NextRequest): Promise<Response> {
     return NextResponse.json({ error: 'Cron not configured' }, { status: 500 });
   }
 
-  const authHeader = req.headers.get('authorization');
-  if (authHeader !== `Bearer ${cronSecret}`) {
+  const authHeader = req.headers.get('authorization') ?? '';
+  const expected = `Bearer ${cronSecret}`;
+
+  // Use timing-safe comparison to prevent timing-oracle attacks
+  const isAuthorized =
+    authHeader.length === expected.length &&
+    timingSafeEqual(Buffer.from(authHeader), Buffer.from(expected));
+
+  if (!isAuthorized) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

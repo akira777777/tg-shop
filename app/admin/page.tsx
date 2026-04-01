@@ -65,12 +65,14 @@ export default function AdminPage() {
   // Orders
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersError, setOrdersError] = useState<string | null>(null);
   const [pendingStatus, setPendingStatus] = useState<Record<number, string>>({});
   const [updatingOrder, setUpdatingOrder] = useState<number | null>(null);
 
   // Products
   const [products, setProducts] = useState<AdminProduct[]>([]);
   const [productsLoading, setProductsLoading] = useState(false);
+  const [productsError, setProductsError] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newProduct, setNewProduct] = useState(EMPTY_PRODUCT);
   const [addingProduct, setAddingProduct] = useState(false);
@@ -80,6 +82,7 @@ export default function AdminPage() {
   // Suggestions
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
 
   useEffect(() => {
     const user = getTelegramUser();
@@ -93,10 +96,14 @@ export default function AdminPage() {
 
   const loadOrders = useCallback(async () => {
     setOrdersLoading(true);
+    setOrdersError(null);
     try {
       const res = await fetch('/api/admin/orders', { headers: authHeaders() });
       if (res.status === 401) { setUnauthorized(true); return; }
+      if (!res.ok) { setOrdersError(`Ошибка загрузки заказов (HTTP ${res.status})`); return; }
       setOrders(await res.json());
+    } catch {
+      setOrdersError('Не удалось загрузить заказы. Проверьте соединение.');
     } finally {
       setOrdersLoading(false);
     }
@@ -104,10 +111,14 @@ export default function AdminPage() {
 
   const loadProducts = useCallback(async () => {
     setProductsLoading(true);
+    setProductsError(null);
     try {
       const res = await fetch('/api/admin/products', { headers: authHeaders() });
       if (res.status === 401) { setUnauthorized(true); return; }
+      if (!res.ok) { setProductsError(`Ошибка загрузки товаров (HTTP ${res.status})`); return; }
       setProducts(await res.json());
+    } catch {
+      setProductsError('Не удалось загрузить товары. Проверьте соединение.');
     } finally {
       setProductsLoading(false);
     }
@@ -115,10 +126,14 @@ export default function AdminPage() {
 
   const loadSuggestions = useCallback(async () => {
     setSuggestionsLoading(true);
+    setSuggestionsError(null);
     try {
       const res = await fetch('/api/admin/suggestions', { headers: authHeaders() });
       if (res.status === 401) { setUnauthorized(true); return; }
+      if (!res.ok) { setSuggestionsError(`Ошибка загрузки предложений (HTTP ${res.status})`); return; }
       setSuggestions(await res.json());
+    } catch {
+      setSuggestionsError('Не удалось загрузить предложения. Проверьте соединение.');
     } finally {
       setSuggestionsLoading(false);
     }
@@ -277,6 +292,8 @@ export default function AdminPage() {
 
             {ordersLoading ? (
               <p className="text-muted-foreground text-center py-10 animate-pulse">Загрузка…</p>
+            ) : ordersError ? (
+              <p className="text-red-400 text-sm text-center py-10">{ordersError}</p>
             ) : orders.length === 0 ? (
               <p className="text-muted-foreground text-center py-10">Заказов пока нет.</p>
             ) : (
@@ -395,6 +412,8 @@ export default function AdminPage() {
 
             {productsLoading ? (
               <p className="text-muted-foreground text-center py-10 animate-pulse">Загрузка…</p>
+            ) : productsError ? (
+              <p className="text-red-400 text-sm text-center py-10">{productsError}</p>
             ) : products.length === 0 ? (
               <p className="text-muted-foreground text-center py-10">Товаров пока нет.</p>
             ) : (
@@ -509,6 +528,8 @@ export default function AdminPage() {
 
             {suggestionsLoading ? (
               <p className="text-muted-foreground text-center py-10 animate-pulse">Загрузка…</p>
+            ) : suggestionsError ? (
+              <p className="text-red-400 text-sm text-center py-10">{suggestionsError}</p>
             ) : suggestions.length === 0 ? (
               <p className="text-muted-foreground text-center py-10">Предложений пока нет.</p>
             ) : (

@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { useCart } from '@/lib/cart-store';
 import { hapticFeedback } from '@/lib/telegram';
+import { useT } from '@/lib/i18n';
 
 interface Product {
   id: number;
@@ -19,6 +20,7 @@ interface Product {
 }
 
 export default function ProductPage() {
+  const t = useT();
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const [product, setProduct] = useState<Product | null>(null);
@@ -40,7 +42,7 @@ export default function ProductPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <p className="text-muted-foreground animate-pulse">Loading…</p>
+        <p className="text-muted-foreground animate-pulse">{t('loading')}</p>
       </div>
     );
   }
@@ -48,9 +50,9 @@ export default function ProductPage() {
   if (!product) {
     return (
       <div className="flex flex-col items-center justify-center h-screen gap-4">
-        <p className="text-muted-foreground">Product not found.</p>
+        <p className="text-muted-foreground">{t('product.notFound')}</p>
         <button onClick={() => router.back()} className="text-primary text-sm underline">
-          Go back
+          {t('product.back')}
         </button>
       </div>
     );
@@ -74,7 +76,7 @@ export default function ProductPage() {
         onClick={() => router.back()}
         className="absolute top-4 left-4 z-10 bg-background/80 backdrop-blur rounded-full p-2 text-sm"
       >
-        ← Back
+        {t('product.back')}
       </button>
 
       {product.imageUrl ? (
@@ -108,28 +110,30 @@ export default function ProductPage() {
         )}
 
         <p className="text-xs text-muted-foreground">
-          {product.stock > 0 ? `${product.stock} in stock` : 'Out of stock'}
+          {product.stock > 0
+            ? t('catalog.inStock', { count: String(product.stock) })
+            : t('catalog.outOfStock')}
         </p>
       </div>
 
       <div className="p-4 border-t">
         {product.stock === 0 ? (
           <div className="w-full bg-muted text-muted-foreground text-center rounded-lg py-3 text-sm">
-            Out of stock
+            {t('catalog.outOfStock')}
           </div>
         ) : inCart ? (
           <button
             onClick={() => router.push('/cart')}
             className="w-full bg-secondary text-secondary-foreground rounded-lg py-3 text-sm font-medium"
           >
-            View cart ({inCart.quantity} added)
+            {t('product.viewCart', { count: String(inCart.quantity) })}
           </button>
         ) : (
           <button
             onClick={handleAdd}
             className="w-full bg-primary text-primary-foreground rounded-lg py-3 text-sm font-semibold hover:bg-primary/90 transition-colors"
           >
-            Add to cart — ${parseFloat(product.priceUsdt).toFixed(2)} USDT
+            {t('product.addToCart', { price: parseFloat(product.priceUsdt).toFixed(2) })}
           </button>
         )}
       </div>

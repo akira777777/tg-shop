@@ -113,10 +113,14 @@ export async function POST(req: NextRequest): Promise<Response> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Rate limit: max ORDER_RATE_LIMIT orders per ORDER_RATE_WINDOW seconds per user
+  // Rate limit: max ORDER_RATE_LIMIT orders per ORDER_RATE_WINDOW seconds per user.
+  // Use a pipeline so INCR and EXPIRE NX are sent atomically — prevents a race where
+  // a cold-start INCR sets count=1 but crashes before EXPIRE, leaving a permanent key.
   const rlKey = `ratelimit:orders:${user.id}`;
-  const count = await redis.incr(rlKey);
-  if (count === 1) await redis.expire(rlKey, ORDER_RATE_WINDOW);
+  const rlPipeline = redis.pipeline();
+  rlPipeline.incr(rlKey);
+  rlPipeline.expire(rlKey, ORDER_RATE_WINDOW, 'NX'); // NX: only set TTL on first hit
+  const [count] = await rlPipeline.exec<[number, number]>();
   if (count > ORDER_RATE_LIMIT) {
     return NextResponse.json(
       { error: 'Слишком много заявок. Попробуйте через минуту.' },
@@ -156,11 +160,14 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 
   try {
-    // Upsert user record
+    // Upsert user record — update name/username in case they changed in Telegram
     await db
       .insert(users)
       .values({ telegramId: user.id, firstName: user.first_name, username: user.username })
-      .onConflictDoNothing();
+      .onConflictDoUpdate({
+        target: users.telegramId,
+        set: { firstName: user.first_name, username: user.username },
+      });
 
     // Fetch all needed products in one query instead of N individual lookups
     const productIds = [...new Set(items.map((i) => i.productId))];
@@ -213,7 +220,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       }
     }
 
-    let newOrderId!: number;
+    let newOrderId: number | undefined;
     try {
       await db.transaction(async (tx) => {
         const [newOrder] = await tx
@@ -256,6 +263,11 @@ export async function POST(req: NextRequest): Promise<Response> {
         );
       }
       throw err;
+    }
+
+    // Should never happen — transaction threw before setting newOrderId
+    if (newOrderId === undefined) {
+      return NextResponse.json({ error: 'Failed to create order' }, { status: 500 });
     }
 
     // Invalidate product cache so next catalog load reflects updated stock

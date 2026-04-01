@@ -34,7 +34,10 @@ export async function POST(req: NextRequest): Promise<Response> {
     await db
       .insert(users)
       .values({ telegramId: user.id, firstName: user.first_name, username: user.username })
-      .onConflictDoNothing();
+      .onConflictDoUpdate({
+        target: users.telegramId,
+        set: { firstName: user.first_name, username: user.username },
+      });
 
     await db.insert(suggestions).values({ userId: user.id, productName, description });
 

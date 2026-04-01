@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
 import { getTelegramUser, getInitData } from '@/lib/telegram';
+import { orderComment } from '@/lib/ton/shared';
 
 interface OrderItem {
   name: string;
@@ -49,6 +50,7 @@ export default function OrdersPage() {
   const user = useMemo(() => getTelegramUser(), []);
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(!!user);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -56,9 +58,15 @@ export default function OrdersPage() {
     fetch('/api/orders', {
       headers: { 'x-telegram-init-data': getInitData() },
     })
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((data: Order[]) => setOrders(Array.isArray(data) ? data : []))
-      .catch(console.error)
+      .catch((err) => {
+        console.error('[orders] Failed to load:', err);
+        setFetchError('Не удалось загрузить заказы. Попробуйте позже.');
+      })
       .finally(() => setLoading(false));
   }, [user]);
 
@@ -66,6 +74,14 @@ export default function OrdersPage() {
     return (
       <div className="flex items-center justify-center h-screen">
         <p className="text-muted-foreground animate-pulse">Загрузка заказов…</p>
+      </div>
+    );
+  }
+
+  if (fetchError) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <p className="text-red-400 text-sm text-center px-4">{fetchError}</p>
       </div>
     );
   }
@@ -131,7 +147,7 @@ export default function OrdersPage() {
                       method: order.paymentMethod,
                     });
                     if (order.paymentAmountTon) p.set('tonAmount', order.paymentAmountTon);
-                    if (order.paymentMethod === 'ton') p.set('comment', `ORDER-${order.id}`);
+                    if (order.paymentMethod === 'ton') p.set('comment', orderComment(order.id));
                     router.push(`/checkout?${p.toString()}`);
                   }}
                   className="text-xs text-primary underline"

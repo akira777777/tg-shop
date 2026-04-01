@@ -59,14 +59,15 @@ async function upsertUser(
   userName: string,
   fullName: string,
 ): Promise<void> {
+  const firstName = fullName.split(' ')[0] ?? 'User';
+  const username = userName || undefined;
   await db
     .insert(users)
-    .values({
-      telegramId: authorId,
-      username: userName || undefined,
-      firstName: fullName.split(' ')[0] ?? 'User',
-    })
-    .onConflictDoNothing();
+    .values({ telegramId: authorId, username, firstName })
+    .onConflictDoUpdate({
+      target: users.telegramId,
+      set: { firstName, username },
+    });
 }
 
 async function relayToAdmins(
@@ -123,7 +124,7 @@ async function handleStatus(
 export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadState>): void {
   // ── New DM (first contact, thread not yet subscribed) ─────────────────────
   bot.onDirectMessage(async (thread, message) => {
-    const authorId = parseInt(message.author.userId);
+    const authorId = parseInt(message.author.userId, 10);
     const isAdmin = ADMIN_IDS.includes(authorId);
     const msgText = message.text ?? '';
 
@@ -159,7 +160,7 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
 
   // ── Subscribed thread messages ─────────────────────────────────────────────
   bot.onSubscribedMessage(async (thread, message) => {
-    const authorId = parseInt(message.author.userId);
+    const authorId = parseInt(message.author.userId, 10);
     const isAdmin = ADMIN_IDS.includes(authorId);
     const msgText = message.text ?? '';
 
@@ -212,7 +213,7 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
   // ── Actions (inline keyboard callbacks) ───────────────────────────────────
   bot.onAction(async (event) => {
     const { actionId, user, thread } = event;
-    const authorId = parseInt(user.userId);
+    const authorId = parseInt(user.userId, 10);
 
     // User: My Orders
     if (actionId === 'my_orders') {
@@ -417,6 +418,11 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
       const firstUnderscore = withoutPrefix.indexOf('_');
       const orderId = parseInt(withoutPrefix.slice(0, firstUnderscore), 10);
       const newStatus = withoutPrefix.slice(firstUnderscore + 1);
+
+      if (isNaN(orderId) || orderId <= 0) {
+        await thread?.post('❌ Некорректный ID заказа.');
+        return;
+      }
 
       if (!VALID_STATUSES.includes(newStatus)) {
         await thread?.post('❌ Неверный статус.');

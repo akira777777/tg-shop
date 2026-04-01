@@ -18,6 +18,7 @@ interface TronGridTx {
   to: string;
   value: string;
   confirmed: boolean;
+  block_timestamp: number; // milliseconds since epoch
 }
 
 /**
@@ -58,10 +59,16 @@ export async function checkPendingPayments(): Promise<void> {
         Math.round(parseFloat(order.totalUsdt) * 1_000_000)
       );
 
+      // Only consider transactions that arrived AFTER this order was created.
+      // This prevents a recycled deposit address from matching a previous
+      // tenant's payment TX (C1 false-confirmation bug).
+      const orderCreatedMs = order.createdAt ? new Date(order.createdAt).getTime() : 0;
+
       const match = txs.find(
         (tx) =>
           tx.to === order.paymentAddress &&
           BigInt(tx.value) >= requiredMicro &&
+          tx.block_timestamp >= orderCreatedMs &&
           (CONFIRMATIONS_REQUIRED <= 1 || tx.confirmed)
       );
 

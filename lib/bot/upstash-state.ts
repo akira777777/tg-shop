@@ -19,7 +19,9 @@ export function createUpstashState(redis: Redis, keyPrefix = DEFAULT_PREFIX): St
     try {
       return JSON.parse(raw) as T;
     } catch {
-      return raw as unknown as T;
+      // raw is not valid JSON — return null rather than silently casting a
+      // corrupt string to T, which would cause downstream type errors.
+      return null;
     }
   };
 
@@ -111,17 +113,29 @@ export function createUpstashState(redis: Redis, keyPrefix = DEFAULT_PREFIX): St
     },
     async releaseLock(lock: Lock): Promise<void> {
       const lockKey = k(`lock:${lock.threadId}`);
-      const current = await redis.get<string>(lockKey);
-      if (current === lock.token) {
-        await redis.del(lockKey);
-      }
+      // Atomic check-and-delete via Lua to prevent a TOCTOU race where another
+      // holder acquires the lock between our GET and DEL.
+      const script = `
+        if redis.call("get", KEYS[1]) == ARGV[1] then
+          return redis.call("del", KEYS[1])
+        else
+          return 0
+        end
+      `;
+      await redis.eval(script, [lockKey], [lock.token]);
     },
     async extendLock(lock: Lock, ttlMs: number): Promise<boolean> {
       const lockKey = k(`lock:${lock.threadId}`);
-      const current = await redis.get<string>(lockKey);
-      if (current !== lock.token) return false;
-      await redis.pexpire(lockKey, ttlMs);
-      return true;
+      // Atomic check-and-pexpire via Lua for the same reason as releaseLock.
+      const script = `
+        if redis.call("get", KEYS[1]) == ARGV[1] then
+          return redis.call("pexpire", KEYS[1], ARGV[2])
+        else
+          return 0
+        end
+      `;
+      const result = await redis.eval(script, [lockKey], [lock.token, String(ttlMs)]);
+      return result === 1;
     },
     async forceReleaseLock(threadId: string): Promise<void> {
       await redis.del(k(`lock:${threadId}`));

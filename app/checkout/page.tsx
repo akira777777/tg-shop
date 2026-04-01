@@ -35,10 +35,15 @@ function CheckoutInner() {
   }, [address]);
 
   async function copyToClipboard(text: string, setter: (v: boolean) => void) {
-    await navigator.clipboard.writeText(text);
-    setter(true);
-    hapticFeedback('notification');
-    setTimeout(() => setter(false), 2000);
+    try {
+      await navigator.clipboard.writeText(text);
+      setter(true);
+      hapticFeedback('notification');
+      setTimeout(() => setter(false), 2000);
+    } catch {
+      // Clipboard API may be unavailable in some Telegram WebView builds
+      setError('Не удалось скопировать. Скопируйте вручную.');
+    }
   }
 
   async function confirmPayment() {
@@ -48,7 +53,7 @@ function CheckoutInner() {
     setError(null);
 
     try {
-      await fetch(`/api/orders/${orderId}`, {
+      const res = await fetch(`/api/orders/${orderId}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -56,6 +61,11 @@ function CheckoutInner() {
         },
         body: JSON.stringify({}),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError((data as { error?: string }).error ?? 'Ошибка сервера. Попробуйте ещё раз.');
+        return;
+      }
       setSubmitted(true);
       hapticFeedback('notification');
     } catch {

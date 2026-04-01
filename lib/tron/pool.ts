@@ -1,32 +1,55 @@
 import { redis } from '@/lib/redis';
 
 const POOL_KEY = 'tron:pool:available';
+const SEED_LOCK_KEY = 'tron:pool:seed-lock';
+const SEED_LOCK_TTL_MS = 5_000; // 5 seconds — enough to complete sadd
 
 /**
  * Seeds the Redis pool from TRON_DEPOSIT_ADDRESS_POOL env var (comma-separated).
  * Only seeds if the pool is currently empty.
+ * Uses a distributed SET NX lock to prevent TOCTOU races on cold starts.
  */
 async function seedPoolIfEmpty(): Promise<void> {
   const existing = await redis.scard(POOL_KEY);
   if (existing > 0) return;
 
-  const raw = process.env.TRON_DEPOSIT_ADDRESS_POOL ?? '';
-  const addresses = raw
-    .split(',')
-    .map((a) => a.trim())
-    .filter(Boolean);
+  // Acquire a short-lived seed lock — only one instance runs the seed
+  const lockToken = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const acquired = await redis.set(SEED_LOCK_KEY, lockToken, {
+    nx: true,
+    px: SEED_LOCK_TTL_MS,
+  });
+  if (acquired !== 'OK') return; // another instance is already seeding
 
-  if (addresses.length === 0) {
-    throw new Error(
-      'TRON_DEPOSIT_ADDRESS_POOL is empty. Add TRC20 addresses (comma-separated) to your env.'
+  try {
+    // Re-check inside the lock to guard against the TOCTOU window
+    const stillEmpty = await redis.scard(POOL_KEY);
+    if (stillEmpty > 0) return;
+
+    const raw = process.env.TRON_DEPOSIT_ADDRESS_POOL ?? '';
+    const addresses = raw
+      .split(',')
+      .map((a) => a.trim())
+      .filter(Boolean);
+
+    if (addresses.length === 0) {
+      throw new Error(
+        'TRON_DEPOSIT_ADDRESS_POOL is empty. Add TRC20 addresses (comma-separated) to your env.'
+      );
+    }
+
+    // Upstash sadd accepts (key, member, ...members) — pass as array spread via rest
+    await (redis.sadd as (key: string, ...members: string[]) => Promise<number>)(
+      POOL_KEY,
+      ...addresses
     );
+  } finally {
+    // Release the lock only if we still own it
+    const current = await redis.get<string>(SEED_LOCK_KEY);
+    if (current === lockToken) {
+      await redis.del(SEED_LOCK_KEY);
+    }
   }
-
-  // Upstash sadd accepts (key, member, ...members) — pass as array spread via rest
-  await (redis.sadd as (key: string, ...members: string[]) => Promise<number>)(
-    POOL_KEY,
-    ...addresses
-  );
 }
 
 /**

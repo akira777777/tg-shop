@@ -1,5 +1,8 @@
 import { redis } from '@/lib/redis';
 
+// Re-export pure utilities so callers only need one import path
+export { orderComment, usdtToTon, toNanoton } from './shared';
+
 const CACHE_KEY = 'ton:usd_price';
 const CACHE_TTL = 300; // 5 minutes
 
