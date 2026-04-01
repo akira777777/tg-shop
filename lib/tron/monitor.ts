@@ -1,8 +1,9 @@
 import { db } from '@/lib/db';
-import { orders } from '@/lib/db/schema';
-import { eq, and, lt, isNull, inArray } from 'drizzle-orm';
+import { orders, orderItems, products } from '@/lib/db/schema';
+import { eq, and, lt, isNull, inArray, sql } from 'drizzle-orm';
 import { notifyPaymentConfirmed, notifyOrderExpired } from '@/lib/bot/notifications';
 import { releaseAddress } from './pool';
+import { invalidateProductsCache } from '@/lib/products-cache';
 
 const USDT_CONTRACT =
   process.env.TRON_USDT_CONTRACT ?? 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
@@ -29,10 +30,15 @@ interface TronGridTx {
 export async function checkPendingPayments(): Promise<void> {
   await expireStaleOrders();
 
+  // Also check 'pending' orders — user may have sent crypto but closed the app
+  // before clicking "I sent payment", so the PATCH to awaiting_payment never fired.
   const pending = await db
     .select()
     .from(orders)
-    .where(and(eq(orders.status, 'awaiting_payment'), eq(orders.paymentMethod, 'trc20')));
+    .where(and(
+      inArray(orders.status, ['awaiting_payment', 'pending']),
+      eq(orders.paymentMethod, 'trc20'),
+    ));
 
   for (const order of pending) {
     try {
@@ -55,14 +61,17 @@ export async function checkPendingPayments(): Promise<void> {
       const txs = json.data ?? [];
 
       // USDT has 6 decimals — order.totalUsdt stored as e.g. "10.500000"
-      const requiredMicro = BigInt(
-        Math.round(parseFloat(order.totalUsdt) * 1_000_000)
-      );
+      // Parse string directly to avoid IEEE-754 float drift
+      const [whole, frac = ''] = order.totalUsdt.split('.');
+      const fracPadded = frac.padEnd(6, '0').slice(0, 6);
+      const requiredMicro = BigInt(whole) * BigInt(1_000_000) + BigInt(fracPadded);
 
       // Only consider transactions that arrived AFTER this order was created.
       // This prevents a recycled deposit address from matching a previous
       // tenant's payment TX (C1 false-confirmation bug).
-      const orderCreatedMs = order.createdAt ? new Date(order.createdAt).getTime() : 0;
+      // If createdAt is somehow null, skip this order rather than matching all txs.
+      if (!order.createdAt) continue;
+      const orderCreatedMs = new Date(order.createdAt).getTime();
 
       const match = txs.find(
         (tx) =>
@@ -104,7 +113,7 @@ async function expireStaleOrders(): Promise<void> {
     .from(orders)
     .where(
       and(
-        eq(orders.status, 'awaiting_payment'),
+        inArray(orders.status, ['awaiting_payment', 'pending']),
         eq(orders.paymentMethod, 'trc20'),
         lt(orders.createdAt, cutoff)
       )
@@ -113,16 +122,48 @@ async function expireStaleOrders(): Promise<void> {
   const staleIds = stale.map((o) => o.id);
   if (staleIds.length > 0) {
     await db.update(orders).set({ status: 'cancelled' }).where(inArray(orders.id, staleIds));
+
+    // Restore stock for all items in cancelled orders
+    await restoreStock(staleIds);
+    await invalidateProductsCache().catch(() => {});
   }
 
-  for (const order of stale) {
-    // Return TRC20 address to the pool so it can be reused
-    await releaseAddress(order.paymentAddress).catch((err) =>
-      console.error(`[tron-monitor] Failed to release address for expired order ${order.id}:`, err)
-    );
+  await Promise.allSettled(
+    stale.map(async (order) => {
+      // Return TRC20 address to the pool so it can be reused
+      await releaseAddress(order.paymentAddress).catch((err) =>
+        console.error(`[tron-monitor] Failed to release address for expired order ${order.id}:`, err)
+      );
+      if (order.userId) {
+        await notifyOrderExpired(order.userId, order.id);
+      }
+    })
+  );
+}
 
-    if (order.userId) {
-      await notifyOrderExpired(order.userId, order.id);
-    }
+/** Restore product stock for cancelled order items. */
+async function restoreStock(cancelledOrderIds: number[]): Promise<void> {
+  const items = await db
+    .select({ productId: orderItems.productId, quantity: orderItems.quantity })
+    .from(orderItems)
+    .where(inArray(orderItems.orderId, cancelledOrderIds));
+
+  // Aggregate quantities per product in case multiple cancelled orders share a product
+  const qtyByProduct = new Map<number, number>();
+  for (const item of items) {
+    if (item.productId == null) continue;
+    qtyByProduct.set(item.productId, (qtyByProduct.get(item.productId) ?? 0) + item.quantity);
   }
+
+  await Promise.allSettled(
+    [...qtyByProduct.entries()].map(([productId, qty]) =>
+      db
+        .update(products)
+        .set({ stock: sql`${products.stock} + ${qty}` })
+        .where(eq(products.id, productId))
+        .catch((err) =>
+          console.error(`[tron-monitor] Failed to restore stock for product ${productId}:`, err)
+        )
+    )
+  );
 }

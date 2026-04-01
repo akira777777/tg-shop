@@ -19,15 +19,26 @@ interface Product {
 export default function CatalogPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('Все');
   const [search, setSearch] = useState('');
 
   useEffect(() => {
-    fetch('/api/products')
-      .then((r) => r.json())
+    const controller = new AbortController();
+    fetch('/api/products', { signal: controller.signal })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((data) => setProducts(Array.isArray(data) ? data : []))
-      .catch(console.error)
+      .catch((err) => {
+        if (err.name !== 'AbortError') {
+          console.error('[catalog] Failed to load:', err);
+          setError('Не удалось загрузить каталог. Попробуйте позже.');
+        }
+      })
       .finally(() => setLoading(false));
+    return () => controller.abort();
   }, []);
 
   const categories = useMemo(
@@ -49,6 +60,14 @@ export default function CatalogPage() {
     return (
       <div className="flex items-center justify-center h-screen">
         <p className="text-muted-foreground animate-pulse">Загрузка каталога…</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <p className="text-red-400 text-sm text-center px-4">{error}</p>
       </div>
     );
   }

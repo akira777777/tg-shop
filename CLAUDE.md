@@ -26,7 +26,7 @@ No test suite is configured.
 
 ## Key Library Notes
 
-- **UI components**: `@base-ui/react` (headless, Radix/MUI lineage) — **not shadcn/ui**. Custom wrappers live in `components/ui/`. Do not assume shadcn primitives or `cn()` utilities exist.
+- **UI components**: `@base-ui/react` (headless, Radix/MUI lineage) — **not shadcn/ui**. Custom wrappers live in `components/ui/`. `cn()` exists in `lib/utils.ts` (clsx + tailwind-merge). Do not assume other shadcn primitives exist.
 - **Zod v4** (`^4.3.6`): Error shape API differs from v3. Use `.flatten()` from `z.ZodError` — `error.flatten()` returns `{ formErrors, fieldErrors }` as in v3, but import paths changed. Use `import { z } from 'zod'` (not `zod/v3`).
 - **Tailwind CSS v4**: Config uses `@tailwindcss/postcss`, not the v3 `tailwind.config.js` approach.
 
@@ -36,7 +36,7 @@ This is a **Telegram Mini App** e-commerce store with crypto payments. It runs a
 
 ### Authentication
 
-Every user-facing API route authenticates via Telegram's HMAC-SHA256 `initData` signature. The client sends the raw `initData` string in an `x-init-data` request header; routes call `verifyInitData()` from `lib/telegram-auth.ts` which returns the parsed `TelegramUser` or `null`.
+Every user-facing API route authenticates via Telegram's HMAC-SHA256 `initData` signature. The client sends the raw `initData` string in an `x-telegram-init-data` request header; routes call `verifyInitData()` from `lib/telegram-auth.ts` which returns the parsed `TelegramUser` or `null`. `initData` older than 24 hours is rejected to prevent replay attacks.
 
 **HMAC note**: `lib/telegram-auth.ts` uses `createHmac(algo, 'WebAppData').update(botToken)` — this is correct per the Telegram spec. Do not change it.
 
@@ -68,7 +68,7 @@ TRC20 uses idempotency on `txHash IS NULL` before marking paid. Both monitors ca
 
 ### Telegram Bot (Chat SDK)
 
-The bot uses Vercel's **Chat SDK** (`chat` + `@chat-adapter/telegram` + `@chat-adapter/state-redis`).
+The bot uses Vercel's **Chat SDK** (`chat` + `@chat-adapter/telegram`).
 
 - **Singleton**: `lib/bot/index.ts` — lazy init via `getBot()` (not a direct `bot` export). `getBot()` creates the `Chat` instance on first call and caches it in a module-level variable.
 - **Webhook**: `app/api/telegram/webhook/route.ts` — `POST` handler calls `getBot().webhooks.telegram(request, { waitUntil: (task) => after(() => task) })`. Uses Next.js `after()` (not `waitUntil` directly) so the response returns immediately while bot logic runs post-response.
@@ -112,9 +112,21 @@ All prices are stored as `numeric(18,6)` (USDT) or `numeric(18,9)` (TON amounts)
 
 ### Redis Clients
 
-Two separate Redis connections are used:
-- `lib/redis.ts` — `@upstash/redis` REST client (`UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`). Used for product cache, TRC20 pool, and TON price.
-- Chat SDK state adapter — ioredis-compatible `UPSTASH_REDIS_URL` (`rediss://...`). Used exclusively for bot thread state in `lib/bot/index.ts`.
+A single `@upstash/redis` REST client (`UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`) is used for everything:
+- `lib/redis.ts` — product cache, TRC20 pool, TON price cache, rate limiting.
+- Bot thread state (`lib/bot/index.ts`) — uses `createUpstashState()` from `lib/bot/upstash-state.ts`, a custom `StateAdapter` built on the same REST client. Replaces the former `@chat-adapter/state-redis` (ioredis/TCP), which hung on Vercel cold starts because port 6380 is unreachable from serverless. In dev without credentials, falls back to `createMemoryState()` (in-memory, non-persistent).
+
+`UPSTASH_REDIS_URL` (`rediss://...`) is **no longer used**.
+
+### Path Alias
+
+`@/*` maps to the project root (configured in `tsconfig.json`). All internal imports use `@/lib/...`, `@/components/...`, etc.
+
+### Stock & Rate Limiting Patterns
+
+Order creation (`POST /api/orders`) uses two atomicity patterns:
+- **Rate limiting**: Redis pipeline (`INCR` + `EXPIRE NX`) — atomic counter with TTL set only on first hit, prevents race where crash between INCR and EXPIRE leaves a permanent key.
+- **Stock decrement**: DB transaction with `WHERE stock >= quantity` guard — if a concurrent order depleted stock, the update returns zero rows and the transaction rolls back.
 
 ### Telegram WebApp Initialization
 
@@ -143,8 +155,7 @@ Two separate Redis connections are used:
 | `TONCENTER_API_URL` | TonCenter base URL (optional) |
 | `PAYMENT_CONFIRMATIONS_REQUIRED` | TRC20 confirmations before marking paid (default 1) |
 | `DATABASE_URL` | PostgreSQL connection string |
-| `UPSTASH_REDIS_REST_URL` / `_TOKEN` | Redis for address pool, product cache, TON price cache |
-| `UPSTASH_REDIS_URL` | Redis connection URL (`rediss://...`) for Chat SDK state adapter |
+| `UPSTASH_REDIS_REST_URL` / `_TOKEN` | Redis REST client — address pool, product cache, TON price cache, bot state |
 | `CRON_SECRET` | Authenticates `/api/payments/verify` (sent as `Authorization: Bearer` by QStash) |
 | `QSTASH_TOKEN` | Upstash QStash token — needed to create/manage the every-minute payment verify schedule |
 | `ORDER_TTL_MINUTES` | Order expiry — TRC20 default 30 min, TON default 60 min |

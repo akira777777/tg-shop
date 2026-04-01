@@ -161,10 +161,10 @@ export default function AdminPage() {
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ status: newStatus }),
       });
-      if (res.ok) {
-        setOrders((prev) => prev.map((o) => o.id === orderId ? { ...o, status: newStatus } : o));
-        setPendingStatus((prev) => { const next = { ...prev }; delete next[orderId]; return next; });
-      }
+      if (res.status === 401) { setUnauthorized(true); return; }
+      if (!res.ok) { setOrdersError(`Ошибка обновления заказа (HTTP ${res.status})`); return; }
+      setOrders((prev) => prev.map((o) => o.id === orderId ? { ...o, status: newStatus } : o));
+      setPendingStatus((prev) => { const next = { ...prev }; delete next[orderId]; return next; });
     } finally {
       setUpdatingOrder(null);
     }
@@ -177,9 +177,9 @@ export default function AdminPage() {
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ active }),
     });
-    if (res.ok) {
-      setProducts((prev) => prev.map((p) => p.id === productId ? { ...p, active } : p));
-    }
+    if (res.status === 401) { setUnauthorized(true); return; }
+    if (!res.ok) { setProductsError(`Ошибка изменения статуса товара (HTTP ${res.status})`); return; }
+    setProducts((prev) => prev.map((p) => p.id === productId ? { ...p, active } : p));
   };
 
   const deleteProduct = async (productId: number) => {
@@ -188,14 +188,14 @@ export default function AdminPage() {
       method: 'DELETE',
       headers: authHeaders(),
     });
-    if (res.ok) {
-      const result = await res.json();
-      if (result.deleted) {
-        setProducts((prev) => prev.filter((p) => p.id !== productId));
-      } else {
-        // Had orders — was soft-deleted (deactivated)
-        setProducts((prev) => prev.map((p) => p.id === productId ? { ...p, active: false } : p));
-      }
+    if (res.status === 401) { setUnauthorized(true); return; }
+    if (!res.ok) { setProductsError(`Ошибка удаления товара (HTTP ${res.status})`); return; }
+    const result = await res.json();
+    if (result.deleted) {
+      setProducts((prev) => prev.filter((p) => p.id !== productId));
+    } else {
+      // Had orders — was soft-deleted (deactivated)
+      setProducts((prev) => prev.map((p) => p.id === productId ? { ...p, active: false } : p));
     }
   };
 
@@ -215,11 +215,11 @@ export default function AdminPage() {
           stock: editingProduct.stock,
         }),
       });
-      if (res.ok) {
-        const updated: AdminProduct = await res.json();
-        setProducts((prev) => prev.map((p) => p.id === updated.id ? updated : p));
-        setEditingProduct(null);
-      }
+      if (res.status === 401) { setUnauthorized(true); return; }
+      if (!res.ok) { setProductsError(`Ошибка сохранения товара (HTTP ${res.status})`); return; }
+      const updated: AdminProduct = await res.json();
+      setProducts((prev) => prev.map((p) => p.id === updated.id ? updated : p));
+      setEditingProduct(null);
     } finally {
       setSavingEdit(false);
     }
@@ -241,12 +241,12 @@ export default function AdminPage() {
           stock: parseInt(newProduct.stock, 10) || 0,
         }),
       });
-      if (res.ok) {
-        const created: AdminProduct = await res.json();
-        setProducts((prev) => [created, ...prev]);
-        setNewProduct(EMPTY_PRODUCT);
-        setShowAddForm(false);
-      }
+      if (res.status === 401) { setUnauthorized(true); return; }
+      if (!res.ok) { setProductsError(`Ошибка создания товара (HTTP ${res.status})`); return; }
+      const created: AdminProduct = await res.json();
+      setProducts((prev) => [created, ...prev]);
+      setNewProduct(EMPTY_PRODUCT);
+      setShowAddForm(false);
     } finally {
       setAddingProduct(false);
     }

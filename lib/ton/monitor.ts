@@ -1,7 +1,8 @@
 import { db } from '@/lib/db';
-import { orders } from '@/lib/db/schema';
-import { eq, and, lt, isNull, inArray } from 'drizzle-orm';
+import { orders, orderItems, products } from '@/lib/db/schema';
+import { eq, and, lt, isNull, inArray, sql } from 'drizzle-orm';
 import { notifyPaymentConfirmed, notifyOrderExpired } from '@/lib/bot/notifications';
+import { invalidateProductsCache } from '@/lib/products-cache';
 import { orderComment } from './price';
 
 const TON_WALLET = process.env.TON_WALLET_ADDRESS;
@@ -33,10 +34,15 @@ export async function checkPendingPayments(): Promise<void> {
 
   await expireStaleOrders();
 
+  // Also check 'pending' orders — user may have sent crypto but closed the app
+  // before clicking "I sent payment", so the PATCH to awaiting_payment never fired.
   const pending = await db
     .select()
     .from(orders)
-    .where(and(eq(orders.status, 'awaiting_payment'), eq(orders.paymentMethod, 'ton')));
+    .where(and(
+      inArray(orders.status, ['awaiting_payment', 'pending']),
+      eq(orders.paymentMethod, 'ton'),
+    ));
 
   if (pending.length === 0) return;
 
@@ -73,13 +79,15 @@ export async function checkPendingPayments(): Promise<void> {
     if (!order.paymentAmountTon) continue;
 
     const expectedComment = orderComment(order.id);
-    const expectedNano = BigInt(Math.round(parseFloat(order.paymentAmountTon) * 1_000_000_000));
+    // Parse TON amount string directly to avoid IEEE-754 float drift
+    const [tonWhole, tonFrac = ''] = order.paymentAmountTon.split('.');
+    const tonFracPadded = tonFrac.padEnd(9, '0').slice(0, 9);
+    const expectedNano = BigInt(tonWhole) * BigInt(1_000_000_000) + BigInt(tonFracPadded);
 
     // Only consider transactions that arrived AFTER this order was created,
     // preventing old replay attacks on the shared TON wallet address.
-    const orderCreatedSec = order.createdAt
-      ? Math.floor(new Date(order.createdAt).getTime() / 1000)
-      : 0;
+    if (!order.createdAt) continue;
+    const orderCreatedSec = Math.floor(new Date(order.createdAt).getTime() / 1000);
 
     const match = txs.find((tx) => {
       const comment = tx.in_msg.message ?? '';
@@ -119,7 +127,7 @@ async function expireStaleOrders(): Promise<void> {
     .from(orders)
     .where(
       and(
-        eq(orders.status, 'awaiting_payment'),
+        inArray(orders.status, ['awaiting_payment', 'pending']),
         eq(orders.paymentMethod, 'ton'),
         lt(orders.createdAt, cutoff)
       )
@@ -128,11 +136,41 @@ async function expireStaleOrders(): Promise<void> {
   const staleIds = stale.map((o) => o.id);
   if (staleIds.length > 0) {
     await db.update(orders).set({ status: 'cancelled' }).where(inArray(orders.id, staleIds));
+
+    // Restore stock for all items in cancelled orders
+    await restoreStock(staleIds);
+    await invalidateProductsCache().catch(() => {});
   }
 
-  for (const order of stale) {
-    if (order.userId) {
-      await notifyOrderExpired(order.userId, order.id);
-    }
+  await Promise.allSettled(
+    stale
+      .filter((o) => o.userId !== null)
+      .map((order) => notifyOrderExpired(order.userId!, order.id))
+  );
+}
+
+/** Restore product stock for cancelled order items. */
+async function restoreStock(cancelledOrderIds: number[]): Promise<void> {
+  const items = await db
+    .select({ productId: orderItems.productId, quantity: orderItems.quantity })
+    .from(orderItems)
+    .where(inArray(orderItems.orderId, cancelledOrderIds));
+
+  const qtyByProduct = new Map<number, number>();
+  for (const item of items) {
+    if (item.productId == null) continue;
+    qtyByProduct.set(item.productId, (qtyByProduct.get(item.productId) ?? 0) + item.quantity);
   }
+
+  await Promise.allSettled(
+    [...qtyByProduct.entries()].map(([productId, qty]) =>
+      db
+        .update(products)
+        .set({ stock: sql`${products.stock} + ${qty}` })
+        .where(eq(products.id, productId))
+        .catch((err) =>
+          console.error(`[ton-monitor] Failed to restore stock for product ${productId}:`, err)
+        )
+    )
+  );
 }

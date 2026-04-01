@@ -1,9 +1,10 @@
-const TGAPI = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
+function getTgApiBase(): string {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) throw new Error('[tg] TELEGRAM_BOT_TOKEN is not set');
+  return `https://api.telegram.org/bot${token}`;
+}
 
-export const ADMIN_IDS: number[] = (process.env.ADMIN_CHAT_IDS ?? '')
-  .split(',')
-  .map((s) => parseInt(s.trim(), 10))
-  .filter((n) => !isNaN(n));
+export { ADMIN_IDS } from '@/lib/admin-auth';
 
 export const MINI_APP_URL = process.env.MINI_APP_URL ?? '';
 
@@ -13,7 +14,7 @@ export async function tgSend(
   text: string,
   replyMarkup?: object,
 ): Promise<void> {
-  const res = await fetch(`${TGAPI}/sendMessage`, {
+  const res = await fetch(`${getTgApiBase()}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

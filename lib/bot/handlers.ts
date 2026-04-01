@@ -1,10 +1,12 @@
 import { Actions, Button, Card, CardText, LinkButton } from 'chat';
 import type { Adapter, Chat, Thread } from 'chat';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { messages as messagesTable, orderItems, orders, products, users } from '@/lib/db/schema';
 import { notifyOrderStatusChanged } from './notifications';
 import { ADMIN_IDS, MINI_APP_URL, tgSend } from './telegram-api';
+import { releaseAddress } from '@/lib/tron/pool';
+import { invalidateProductsCache } from '@/lib/products-cache';
 
 const STATUS_EMOJI: Record<string, string> = {
   pending: '🕐',
@@ -115,7 +117,7 @@ async function handleStatus(
   await thread.post({
     markdown:
       `**Заказ #${order.id}**\n` +
-      `Статус: ${emoji} ${order.status.replace('_', ' ')}\n` +
+      `Статус: ${emoji} ${order.status.replaceAll('_', ' ')}\n` +
       `Сумма: $${order.totalUsdt} USDT` +
       (order.txHash ? `\nTX: \`${order.txHash}\`` : ''),
   });
@@ -438,6 +440,27 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
       if (!updated) {
         await thread?.post('❌ Заказ не найден.');
         return;
+      }
+
+      // Restore stock and release TRC20 address when admin cancels an order
+      if (newStatus === 'cancelled') {
+        const items = await db
+          .select({ productId: orderItems.productId, quantity: orderItems.quantity })
+          .from(orderItems)
+          .where(eq(orderItems.orderId, orderId));
+        await Promise.allSettled(
+          items
+            .filter((i) => i.productId != null)
+            .map((i) =>
+              db.update(products)
+                .set({ stock: sql`${products.stock} + ${i.quantity}` })
+                .where(eq(products.id, i.productId!))
+            )
+        );
+        if (updated.paymentMethod === 'trc20' && updated.paymentAddress) {
+          await releaseAddress(updated.paymentAddress).catch(() => {});
+        }
+        await invalidateProductsCache().catch(() => {});
       }
 
       await thread?.post(

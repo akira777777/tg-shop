@@ -54,9 +54,11 @@ export default function OrdersPage() {
 
   useEffect(() => {
     if (!user) return;
+    const controller = new AbortController();
 
     fetch('/api/orders', {
       headers: { 'x-telegram-init-data': getInitData() },
+      signal: controller.signal,
     })
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -64,10 +66,13 @@ export default function OrdersPage() {
       })
       .then((data: Order[]) => setOrders(Array.isArray(data) ? data : []))
       .catch((err) => {
-        console.error('[orders] Failed to load:', err);
-        setFetchError('Не удалось загрузить заказы. Попробуйте позже.');
+        if (err.name !== 'AbortError') {
+          console.error('[orders] Failed to load:', err);
+          setFetchError('Не удалось загрузить заказы. Попробуйте позже.');
+        }
       })
       .finally(() => setLoading(false));
+    return () => controller.abort();
   }, [user]);
 
   if (loading) {

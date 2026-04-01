@@ -1,6 +1,6 @@
 import { verifyInitData, type TelegramUser } from './telegram-auth';
 
-const ADMIN_IDS: number[] = (process.env.ADMIN_CHAT_IDS ?? '')
+export const ADMIN_IDS: number[] = (process.env.ADMIN_CHAT_IDS ?? '')
   .split(',')
   .map((s) => parseInt(s.trim(), 10))
   .filter((n) => !isNaN(n));
