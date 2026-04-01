@@ -8,7 +8,8 @@ export { ADMIN_IDS } from '@/lib/admin-auth';
 
 export const MINI_APP_URL = process.env.MINI_APP_URL ?? '';
 
-/** Send a message via raw Telegram Bot API. Used for web_app buttons which Chat SDK doesn't expose. */
+/** Send a message via raw Telegram Bot API. Used for web_app buttons which Chat SDK doesn't expose.
+ *  Throws on failure so callers can detect delivery errors. */
 export async function tgSend(
   chatId: number | string,
   text: string,
@@ -26,6 +27,8 @@ export async function tgSend(
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    console.error(`[tg] sendMessage to ${chatId} failed (${res.status}):`, body);
+    const msg = `[tg] sendMessage to ${chatId} failed (${res.status}): ${body}`;
+    console.error(msg);
+    throw new Error(msg);
   }
 }

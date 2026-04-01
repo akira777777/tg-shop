@@ -2,11 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-@AGENTS.md
+## CRITICAL: This is NOT the Next.js you know
 
-## Next.js 16 — Read Bundled Docs First
-
-This project runs **Next.js 16** (canary). APIs, conventions, and file structure differ from training data. Before writing or modifying any Next.js code, **read the relevant guide in `node_modules/next/dist/docs/`** — it is the source of truth.
+This project runs **Next.js 16** (canary). APIs, conventions, and file structure **differ from training data and may have breaking changes**. Before writing or modifying any Next.js code, **read the relevant guide in `node_modules/next/dist/docs/`** — it is the source of truth. Heed deprecation notices.
 
 Key Next.js 16 patterns used in this codebase:
 - **`after()`** — imported from `next/server`, used in the webhook route to run bot logic post-response. Not the same as `waitUntil`.
@@ -18,10 +16,11 @@ Key Next.js 16 patterns used in this codebase:
 ```bash
 npm run dev          # Start development server
 npm run build        # Production build
-npm run lint         # ESLint
+npm run lint         # ESLint (flat config, eslint-config-next)
 npm run bot:poll     # Run Telegram bot in long-polling mode (local dev only)
 npm run db:push      # Push Drizzle schema changes to Postgres (non-destructive)
 npm run db:studio    # Open Drizzle Studio (local DB GUI)
+npx tsx lib/bot/setup.ts  # One-time: register bot commands + menu button with Telegram
 ```
 
 **`db:push` gotcha**: `drizzle-kit` does not auto-load `.env.local`. Pass `DATABASE_URL` explicitly:
@@ -32,6 +31,8 @@ DATABASE_URL='postgresql://...' npm run db:push
 **Package manager**: The repo has both `pnpm-lock.yaml` (used by Vercel CI) and `package-lock.json`. Vercel builds with pnpm. Use `pnpm` for local installs to avoid lock-file drift.
 
 No test suite is configured.
+
+**`DEPLOY.md` is partially stale** — it lists `UPSTASH_REDIS_URL` as required and describes `vercel.json` cron config. Both are outdated. The current setup uses only the REST client (`UPSTASH_REDIS_REST_URL`/`_TOKEN`) and QStash for scheduling. Trust this file over `DEPLOY.md`.
 
 ## Key Library Notes
 
@@ -113,7 +114,9 @@ Cart is Zustand (`lib/cart-store.ts`) persisted to `localStorage`. No server-sid
 
 ### Admin
 
-`/admin` is a client-side dashboard protected by `lib/admin-auth.ts` (checks `ADMIN_CHAT_IDS`). It manages products, orders, and suggestions via `/api/admin/*` routes. There is no server-side middleware guarding `/admin` — protection is client-side only.
+`/admin` is a client-side dashboard protected by `lib/admin-auth.ts` (checks `ADMIN_CHAT_IDS`). It manages products, orders, and suggestions via `/api/admin/*` routes. There is no server-side middleware guarding `/admin` — protection is API-side only (each `/api/admin/*` route calls `verifyAdmin()`).
+
+`GET /api/admin/me` — lightweight endpoint that returns `{ isAdmin: true }` or 401. Used by `BottomNav` to conditionally show the admin tab (⚙️) for admin users. The check runs once on component mount.
 
 ### i18n
 
@@ -135,8 +138,6 @@ A single `@upstash/redis` REST client (`UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS
 
 `UPSTASH_REDIS_URL` (`rediss://...`) is **no longer used**.
 
-> **DEPLOY.md is partially stale**: It lists `UPSTASH_REDIS_URL` as a required variable and describes `vercel.json` cron config — both are outdated. The current setup uses only the REST client (`UPSTASH_REDIS_REST_URL`/`_TOKEN`) and QStash for scheduling. Ignore those sections in `DEPLOY.md`.
-
 ### Path Alias
 
 `@/*` maps to the project root (configured in `tsconfig.json`). All internal imports use `@/lib/...`, `@/components/...`, etc.
@@ -150,6 +151,8 @@ Order creation (`POST /api/orders`) uses two atomicity patterns:
 ### Telegram WebApp Initialization
 
 `components/telegram-init.tsx` (rendered in root layout) calls `WebApp.ready()`, `WebApp.expand()`, and optionally `WebApp.requestFullscreen()` (guarded to Telegram client v7+). It also reads `language_code` from `initDataUnsafe` to set the i18n locale. The Telegram SDK script (`telegram-web-app.js`) is loaded with `strategy="beforeInteractive"` in the root layout.
+
+**Back button**: `lib/use-telegram-nav.ts` exports `useTelegramBackButton()` — call it in any sub-page to wire Telegram's native BackButton to `router.back()`. Already used by cart, orders, suggest, and product detail pages. Always add it to new sub-pages.
 
 ### Security Headers (`next.config.ts`)
 

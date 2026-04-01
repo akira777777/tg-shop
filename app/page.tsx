@@ -5,23 +5,14 @@ import { ProductCard, ProductCardSkeleton } from '@/components/catalog/product-c
 import { CartFab } from '@/components/catalog/cart-fab';
 import { Input } from '@/components/ui/input';
 import { useT } from '@/lib/i18n';
-
-interface Product {
-  id: number;
-  name: string;
-  description: string | null;
-  priceUsdt: string;
-  category: string;
-  imageUrl: string | null;
-  stock: number;
-}
+import type { Product } from '@/lib/types';
 
 export default function CatalogPage() {
   const t = useT();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState('Все');
+  const [activeTab, setActiveTab] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
   useEffect(() => {
@@ -35,7 +26,7 @@ export default function CatalogPage() {
       .catch((err) => {
         if (err.name !== 'AbortError') {
           console.error('[catalog] Failed to load:', err);
-          setError('Не удалось загрузить каталог. Попробуйте позже.');
+          setError(t('catalog.loadError'));
         }
       })
       .finally(() => setLoading(false));
@@ -43,14 +34,14 @@ export default function CatalogPage() {
   }, []);
 
   const categories = useMemo(
-    () => ['Все', ...Array.from(new Set(products.map((p) => p.category)))],
+    () => Array.from(new Set(products.map((p) => p.category))),
     [products]
   );
 
   const filtered = useMemo(
     () =>
       products.filter((p) => {
-        const matchCategory = activeTab === 'Все' || p.category === activeTab;
+        const matchCategory = activeTab === null || p.category === activeTab;
         const matchSearch = p.name.toLowerCase().includes(search.toLowerCase());
         return matchCategory && matchSearch;
       }),
@@ -64,7 +55,7 @@ export default function CatalogPage() {
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold tracking-tight">{t('catalog.title')}</h1>
           {!loading && (
-            <span className="text-xs text-muted-foreground">{filtered.length} товаров</span>
+            <span className="text-xs text-muted-foreground">{t('catalog.productCount', { count: filtered.length })}</span>
           )}
         </div>
         <div className="relative">
@@ -88,6 +79,16 @@ export default function CatalogPage() {
       <div className="px-4 pt-3">
         {/* Category pills */}
         <div className="flex gap-2 overflow-x-auto pb-3 scrollbar-hide -mx-4 px-4">
+          <button
+            onClick={() => setActiveTab(null)}
+            className={`shrink-0 text-xs font-medium rounded-full px-4 py-1.5 transition-all duration-200 ${
+              activeTab === null
+                ? 'bg-primary text-primary-foreground glow-sm'
+                : 'bg-muted/60 text-muted-foreground hover:bg-muted'
+            }`}
+          >
+            {t('catalog.all')}
+          </button>
           {categories.map((cat) => (
             <button
               key={cat}

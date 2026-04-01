@@ -4,9 +4,11 @@ import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import QRCode from 'qrcode';
 import { getTelegramUser, getInitData, hapticFeedback } from '@/lib/telegram';
+import { useT } from '@/lib/i18n';
 
 function CheckoutInner() {
   const router = useRouter();
+  const t = useT();
   const params = useSearchParams();
   const orderId = params.get('orderId');
   const address = params.get('address');
@@ -41,7 +43,7 @@ function CheckoutInner() {
       hapticFeedback('notification');
       setTimeout(() => setter(false), 2000);
     } catch {
-      setError('Не удалось скопировать. Скопируйте вручную.');
+      setError(t('checkout.clipboardError'));
     }
   }
 
@@ -62,13 +64,13 @@ function CheckoutInner() {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setError((data as { error?: string }).error ?? 'Ошибка сервера. Попробуйте ещё раз.');
+        setError((data as { error?: string }).error ?? t('error.network'));
         return;
       }
       setSubmitted(true);
       hapticFeedback('notification');
     } catch {
-      setError('Ошибка соединения. Попробуйте ещё раз.');
+      setError(t('error.network'));
     } finally {
       setLoading(false);
     }
@@ -77,7 +79,7 @@ function CheckoutInner() {
   if (!orderId || !address || !total) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <p className="text-muted-foreground">Некорректная сессия оплаты.</p>
+        <p className="text-muted-foreground">{t('checkout.invalidSession')}</p>
       </div>
     );
   }
@@ -90,23 +92,23 @@ function CheckoutInner() {
   return (
     <div className="flex flex-col min-h-screen">
       <header className="sticky top-0 z-10 glass border-b border-border/50 px-4 py-3">
-        <h1 className="text-lg font-bold">💳 Оплата</h1>
-        <p className="text-xs text-muted-foreground">Заказ #{orderId}</p>
+        <h1 className="text-lg font-bold">{t('checkout.title')}</h1>
+        <p className="text-xs text-muted-foreground">{t('checkout.order')} #{orderId}</p>
       </header>
 
       <div className="flex-1 px-4 py-6 space-y-5">
         {submitted ? (
           <div className="text-center space-y-4 pt-12">
             <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center text-4xl mx-auto">⏳</div>
-            <h2 className="text-lg font-bold">Ожидание подтверждения</h2>
+            <h2 className="text-lg font-bold">{t('checkout.waiting')}</h2>
             <p className="text-sm text-muted-foreground leading-relaxed max-w-xs mx-auto">
-              Мы уведомим вас в Telegram, как только обнаружим платёж. Обычно 1–3 минуты.
+              {t('checkout.waitingDesc')}
             </p>
             <button
               onClick={() => router.push('/orders')}
               className="text-primary text-sm font-medium bg-primary/10 rounded-xl px-5 py-2"
             >
-              Мои заказы
+              {t('checkout.viewOrders')}
             </button>
           </div>
         ) : (
@@ -114,17 +116,17 @@ function CheckoutInner() {
             {/* Amount summary */}
             <div className="surface-elevated rounded-2xl p-4 space-y-2.5">
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Сумма к оплате</span>
+                <span className="text-muted-foreground">{t('checkout.amount')}</span>
                 <span className="font-bold text-primary text-base">{displayAmount}</span>
               </div>
               {isTon && (
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Эквивалент USDT</span>
+                  <span className="text-muted-foreground">{t('checkout.usdtEquiv')}</span>
                   <span className="font-medium">${parseFloat(total).toFixed(2)}</span>
                 </div>
               )}
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Сеть</span>
+                <span className="text-muted-foreground">{t('checkout.network')}</span>
                 <span className="font-medium">{networkLabel}</span>
               </div>
             </div>
@@ -141,7 +143,7 @@ function CheckoutInner() {
                 onClick={() => copyToClipboard(address, setCopied)}
                 className="text-xs bg-primary/15 text-primary px-5 py-2 rounded-full font-semibold active:scale-95 transition-transform"
               >
-                {copied ? '✓ Скопировано!' : 'Копировать адрес'}
+                {copied ? t('checkout.copied') : t('checkout.copyAddress')}
               </button>
             </div>
 
@@ -149,7 +151,7 @@ function CheckoutInner() {
             {isTon && comment && (
               <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4 space-y-2">
                 <p className="text-xs text-blue-300 font-semibold">
-                  💬 Обязательный комментарий к переводу:
+                  {t('checkout.commentLabel')}
                 </p>
                 <div className="flex items-center gap-2">
                   <code className="flex-1 text-sm font-mono bg-background/50 rounded-lg px-3 py-1.5 text-blue-200">
@@ -159,11 +161,11 @@ function CheckoutInner() {
                     onClick={() => copyToClipboard(comment, setCopiedComment)}
                     className="text-xs bg-blue-500/20 text-blue-300 px-3 py-1.5 rounded-full font-semibold shrink-0 active:scale-95 transition-transform"
                   >
-                    {copiedComment ? '✓' : 'Копировать'}
+                    {copiedComment ? '✓' : t('checkout.copyAddress').split(' ')[0]}
                   </button>
                 </div>
                 <p className="text-xs text-blue-300/60">
-                  Без комментария платёж не будет привязан к заказу.
+                  {t('checkout.commentNoMatch')}
                 </p>
               </div>
             )}
@@ -171,15 +173,10 @@ function CheckoutInner() {
             {/* Warning */}
             <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-2xl p-4">
               <p className="text-xs text-yellow-200/80 leading-relaxed">
-                {isTon ? (
-                  <>
-                    ⚠️ Отправьте <strong>ровно {tonAmount ? parseFloat(tonAmount).toFixed(2) : '—'} TON</strong> в сети <strong>TON</strong> с комментарием выше.
-                  </>
-                ) : (
-                  <>
-                    ⚠️ Отправьте <strong>ровно {parseFloat(total).toFixed(2)} USDT</strong> в сети <strong>Tron (TRC20)</strong> на указанный адрес.
-                  </>
-                )}
+                {isTon
+                  ? t('checkout.warningTon', { amount: tonAmount ? parseFloat(tonAmount).toFixed(2) : '—' })
+                  : t('checkout.warningTrc20', { amount: parseFloat(total).toFixed(2) })
+                }
               </p>
             </div>
           </>
@@ -193,11 +190,11 @@ function CheckoutInner() {
             disabled={loading}
             className="w-full bg-primary text-primary-foreground rounded-xl py-3.5 text-sm font-bold hover:bg-primary/90 active:scale-[0.98] transition-all disabled:opacity-50 glow-sm"
           >
-            {loading ? 'Подтверждение…' : 'Я отправил оплату'}
+            {loading ? t('checkout.confirming') : t('checkout.confirmBtnSent')}
           </button>
           {error && <p className="text-center text-xs text-destructive mt-2">{error}</p>}
           <p className="text-center text-xs text-muted-foreground mt-2">
-            Проверка автоматическая — кнопка запускает мониторинг.
+            {t('checkout.autoVerifyNote')}
           </p>
         </div>
       )}
@@ -207,7 +204,7 @@ function CheckoutInner() {
 
 export default function CheckoutPage() {
   return (
-    <Suspense fallback={<div className="flex items-center justify-center h-screen"><p className="text-muted-foreground animate-pulse">Загрузка…</p></div>}>
+    <Suspense fallback={<div className="flex items-center justify-center h-screen"><p className="text-muted-foreground animate-pulse">...</p></div>}>
       <CheckoutInner />
     </Suspense>
   );

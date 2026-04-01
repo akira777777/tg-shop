@@ -110,6 +110,47 @@ const dict = {
   'status.delivered': { ru: '📦 Доставлен', en: '📦 Delivered' },
   'status.cancelled': { ru: '❌ Отменён', en: '❌ Cancelled' },
 
+  // Catalog extras
+  'catalog.productCount': { ru: '{count} товаров', en: '{count} products' },
+  'catalog.loadError': { ru: 'Не удалось загрузить каталог. Попробуйте позже.', en: 'Failed to load catalog. Try again later.' },
+
+  // Cart extras
+  'cart.itemCount': { ru: '{count} позиций', en: '{count} items' },
+  'cart.payVia': { ru: 'Оплатить через {method}', en: 'Pay via {method}' },
+  'cart.back': { ru: '← Назад', en: '← Back' },
+
+  // Checkout extras
+  'checkout.clipboardError': { ru: 'Не удалось скопировать. Скопируйте вручную.', en: 'Copy failed. Please copy manually.' },
+  'checkout.confirmBtnSent': { ru: 'Я отправил оплату', en: "I've sent the payment" },
+  'checkout.autoVerifyNote': { ru: 'Проверка автоматическая — кнопка запускает мониторинг.', en: 'Verification is automatic — the button starts monitoring.' },
+  'checkout.commentLabel': { ru: '💬 Обязательный комментарий к переводу:', en: '💬 Required transfer comment:' },
+  'checkout.commentNoMatch': { ru: 'Без комментария платёж не будет привязан к заказу.', en: 'Without this comment, your payment cannot be matched.' },
+  'checkout.invalidSession': { ru: 'Некорректная сессия оплаты.', en: 'Invalid checkout session.' },
+  'checkout.sendExactly': { ru: '⚠️ Отправьте ровно', en: '⚠️ Send exactly' },
+
+  // Orders extras
+  'orders.orderNum': { ru: 'Заказ', en: 'Order' },
+  'orders.goToCatalog': { ru: 'Перейти в каталог', en: 'Go to catalog' },
+  'orders.fetchError': { ru: 'Не удалось загрузить заказы.', en: 'Failed to load orders.' },
+  'orders.noOrders': { ru: 'Заказов пока нет', en: 'No orders yet' },
+
+  // Suggest extras
+  'suggest.nameRequired': { ru: 'Название товара', en: 'Product name' },
+  'suggest.required': { ru: '*', en: '*' },
+  'suggest.descLabel2': { ru: 'Описание', en: 'Description' },
+  'suggest.descOptional': { ru: '(необязательно)', en: '(optional)' },
+  'suggest.submitBtn': { ru: 'Предложить товар', en: 'Suggest product' },
+  'suggest.openInTg': { ru: 'Откройте в Telegram.', en: 'Open in Telegram.' },
+  'suggest.error': { ru: 'Ошибка', en: 'Error' },
+  'suggest.connectionError': { ru: 'Ошибка соединения.', en: 'Connection error.' },
+  'suggest.thanks': { ru: 'Спасибо!', en: 'Thank you!' },
+  'suggest.received': { ru: 'Ваше предложение принято. Мы рассмотрим его в ближайшее время.', en: 'Your suggestion has been received. We will review it soon.' },
+
+  // Shared errors
+  'error.network': { ru: 'Ошибка соединения. Попробуйте ещё раз.', en: 'Connection error. Please try again.' },
+  'error.orderCreate': { ru: 'Не удалось создать заказ', en: 'Failed to create order' },
+  'error.openInTelegram': { ru: 'Откройте в Telegram для оформления заказа.', en: 'Open in Telegram to checkout.' },
+
   // Loading
   'loading': { ru: 'Загрузка…', en: 'Loading…' },
   'loading.catalog': { ru: 'Загрузка каталога…', en: 'Loading catalog…' },

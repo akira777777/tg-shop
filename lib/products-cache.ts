@@ -1,18 +1,10 @@
 import { redis } from './redis';
+import type { CachedProduct } from './types';
+
+export type { CachedProduct };
 
 export const PRODUCTS_CACHE_KEY = 'catalog:products';
 const PRODUCTS_CACHE_TTL = 300; // 5 minutes
-
-export interface CachedProduct {
-  id: number;
-  name: string;
-  description: string | null;
-  priceUsdt: string;
-  category: string;
-  imageUrl: string | null;
-  stock: number;
-  active: boolean;
-}
 
 export async function getCachedProducts(): Promise<CachedProduct[] | null> {
   return redis.get<CachedProduct[]>(PRODUCTS_CACHE_KEY);

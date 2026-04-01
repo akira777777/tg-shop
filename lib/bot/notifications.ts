@@ -37,7 +37,7 @@ export async function notifyPaymentConfirmed(
     await tgSend(
       channelId,
       `💰 <b>Новый платёж получен</b>\n\nЗаказ <b>#${orderId}</b> · ${network} · <a href="${txUrl}">TX</a>`,
-    );
+    ).catch((err) => console.error('[notify] Channel notification failed:', err));
   }
 }
 

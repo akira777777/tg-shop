@@ -13,17 +13,11 @@ const DEFAULT_PREFIX = 'chat-sdk';
 export function createUpstashState(redis: Redis, keyPrefix = DEFAULT_PREFIX): StateAdapter {
   const k = (key: string) => `${keyPrefix}:${key}`;
 
-  const encode = (value: unknown) => JSON.stringify(value);
-  const decode = <T>(raw: string | null): T | null => {
-    if (raw === null || raw === undefined) return null;
-    try {
-      return JSON.parse(raw) as T;
-    } catch {
-      // raw is not valid JSON — return null rather than silently casting a
-      // corrupt string to T, which would cause downstream type errors.
-      return null;
-    }
-  };
+  // @upstash/redis v1.20+ auto-serializes objects to JSON on set() and
+  // auto-deserializes JSON strings on get(). Manual JSON.stringify/parse
+  // on top of that causes double-encoding — the get() would return the
+  // already-parsed object, and a second JSON.parse() on that object fails
+  // silently (returns null). Let Upstash handle serialization natively.
 
   return {
     // REST is stateless — no persistent connection needed
@@ -44,19 +38,25 @@ export function createUpstashState(redis: Redis, keyPrefix = DEFAULT_PREFIX): St
 
     // ── Key-value store ───────────────────────────────────────────────────
     async get<T = unknown>(key: string): Promise<T | null> {
-      const raw = await redis.get<string>(k(key));
-      return decode<T>(raw);
+      const raw = await redis.get<T>(k(key));
+      if (raw === null || raw === undefined) return null;
+      // Handle legacy double-encoded values: if Upstash returned a string
+      // that looks like JSON, try to parse it (old data stored via encode()).
+      if (typeof raw === 'string') {
+        try { return JSON.parse(raw) as T; } catch { return raw as T; }
+      }
+      return raw;
     },
     async set<T = unknown>(key: string, value: T, ttlMs?: number): Promise<void> {
       if (ttlMs) {
-        await redis.set(k(key), encode(value), { px: ttlMs });
+        await redis.set(k(key), value, { px: ttlMs });
       } else {
-        await redis.set(k(key), encode(value));
+        await redis.set(k(key), value);
       }
     },
     async setIfNotExists(key: string, value: unknown, ttlMs?: number): Promise<boolean> {
       const opts = ttlMs ? { nx: true as const, px: ttlMs } : { nx: true as const };
-      const result = await redis.set(k(key), encode(value), opts);
+      const result = await redis.set(k(key), value, opts);
       return result === 'OK';
     },
     async delete(key: string): Promise<void> {
@@ -70,7 +70,7 @@ export function createUpstashState(redis: Redis, keyPrefix = DEFAULT_PREFIX): St
       options?: { maxLength?: number; ttlMs?: number },
     ): Promise<void> {
       const listKey = k(key);
-      await redis.rpush(listKey, encode(value));
+      await redis.rpush(listKey, value);
       if (options?.maxLength) {
         // Keep the newest maxLength items (trim oldest from the left)
         await redis.ltrim(listKey, -options.maxLength, -1);
@@ -80,14 +80,14 @@ export function createUpstashState(redis: Redis, keyPrefix = DEFAULT_PREFIX): St
       }
     },
     async getList<T = unknown>(key: string): Promise<T[]> {
-      const items = await redis.lrange<string>(k(key), 0, -1);
-      return items.map((item) => decode<T>(item) as T);
+      const items = await redis.lrange<T>(k(key), 0, -1);
+      return items.filter((item): item is T => item !== null);
     },
 
     // ── Message queue (per-thread) ────────────────────────────────────────
     async enqueue(threadId: string, entry: QueueEntry, maxSize: number): Promise<number> {
       const qKey = k(`queue:${threadId}`);
-      const depth = await redis.rpush(qKey, encode(entry));
+      const depth = await redis.rpush(qKey, entry);
       if (depth > maxSize) {
         // Drop oldest entries, keeping the newest maxSize
         await redis.ltrim(qKey, depth - maxSize, -1);
@@ -96,8 +96,8 @@ export function createUpstashState(redis: Redis, keyPrefix = DEFAULT_PREFIX): St
       return depth;
     },
     async dequeue(threadId: string): Promise<QueueEntry | null> {
-      const raw = await redis.lpop<string>(k(`queue:${threadId}`));
-      return decode<QueueEntry>(raw);
+      const raw = await redis.lpop<QueueEntry>(k(`queue:${threadId}`));
+      return raw ?? null;
     },
     async queueDepth(threadId: string): Promise<number> {
       return await redis.llen(k(`queue:${threadId}`));

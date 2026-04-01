@@ -7,16 +7,7 @@ import { useCart } from '@/lib/cart-store';
 import { hapticFeedback } from '@/lib/telegram';
 import { useTelegramBackButton } from '@/lib/use-telegram-nav';
 import { useT } from '@/lib/i18n';
-
-interface Product {
-  id: number;
-  name: string;
-  description: string | null;
-  priceUsdt: string;
-  category: string;
-  imageUrl: string | null;
-  stock: number;
-}
+import type { Product } from '@/lib/types';
 
 export default function ProductPage() {
   useTelegramBackButton();

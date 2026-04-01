@@ -5,11 +5,13 @@ import Image from 'next/image';
 import { useCart } from '@/lib/cart-store';
 import { getTelegramUser, getInitData } from '@/lib/telegram';
 import { useTelegramBackButton } from '@/lib/use-telegram-nav';
+import { useT } from '@/lib/i18n';
 import { useState } from 'react';
 
 export default function CartPage() {
   useTelegramBackButton();
   const router = useRouter();
+  const t = useT();
   const { items, updateQty, total, clear } = useCart();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -18,7 +20,7 @@ export default function CartPage() {
   async function handleCheckout() {
     const user = getTelegramUser();
     if (!user) {
-      setError('Откройте в Telegram для оформления заказа.');
+      setError(t('error.openInTelegram'));
       return;
     }
     setLoading(true);
@@ -39,7 +41,7 @@ export default function CartPage() {
 
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error ?? 'Не удалось создать заказ');
+        setError(data.error ?? t('error.orderCreate'));
         return;
       }
 
@@ -54,7 +56,7 @@ export default function CartPage() {
       if (data.comment) checkoutParams.set('comment', data.comment);
       router.push(`/checkout?${checkoutParams.toString()}`);
     } catch {
-      setError('Ошибка соединения. Попробуйте ещё раз.');
+      setError(t('error.network'));
     } finally {
       setLoading(false);
     }
@@ -64,12 +66,12 @@ export default function CartPage() {
     return (
       <div className="flex flex-col items-center justify-center h-screen gap-4 px-6">
         <div className="w-20 h-20 rounded-full bg-muted/50 flex items-center justify-center text-4xl">🛒</div>
-        <p className="text-muted-foreground">Корзина пуста</p>
+        <p className="text-muted-foreground">{t('cart.empty')}</p>
         <button
           onClick={() => router.push('/')}
           className="text-primary text-sm font-medium bg-primary/10 rounded-xl px-5 py-2"
         >
-          Перейти в каталог
+          {t('cart.browseCatalog')}
         </button>
       </div>
     );
@@ -78,9 +80,8 @@ export default function CartPage() {
   return (
     <div className="flex flex-col min-h-screen" style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}>
       <header className="sticky top-0 z-10 glass border-b border-border/50 px-4 py-3 flex items-center gap-3">
-        <button onClick={() => router.back()} className="text-muted-foreground text-lg">←</button>
-        <h1 className="text-lg font-bold">Корзина</h1>
-        <span className="text-xs text-muted-foreground ml-auto">{items.length} позиций</span>
+        <h1 className="text-lg font-bold">{t('cart.title')}</h1>
+        <span className="text-xs text-muted-foreground ml-auto">{t('cart.itemCount', { count: items.length })}</span>
       </header>
 
       <div className="flex-1 divide-y divide-border/50">
@@ -88,7 +89,7 @@ export default function CartPage() {
           <div key={item.productId} className="flex items-center gap-3 px-4 py-3.5">
             <div className="relative w-14 h-14 rounded-xl bg-muted flex items-center justify-center text-xl shrink-0 overflow-hidden">
               {item.imageUrl ? (
-                <Image src={item.imageUrl} alt={item.name} fill className="object-cover" unoptimized />
+                <Image src={item.imageUrl} alt={item.name} fill sizes="56px" className="object-cover" />
               ) : '🛍️'}
             </div>
             <div className="flex-1 min-w-0">
@@ -112,7 +113,7 @@ export default function CartPage() {
 
       <div className="p-4 border-t border-border/50 space-y-4 surface-elevated">
         <div className="flex justify-between text-lg font-bold">
-          <span>Итого</span>
+          <span>{t('cart.total')}</span>
           <span className="text-primary">${total().toFixed(2)} USDT</span>
         </div>
 
@@ -138,7 +139,7 @@ export default function CartPage() {
           disabled={loading}
           className="w-full bg-primary text-primary-foreground rounded-xl py-3.5 text-sm font-bold hover:bg-primary/90 active:scale-[0.98] transition-all duration-150 disabled:opacity-50 glow-sm"
         >
-          {loading ? 'Создание заказа…' : `Оплатить через ${paymentMethod === 'ton' ? 'TON' : 'USDT (TRC20)'}`}
+          {loading ? t('cart.creating') : t('cart.payVia', { method: paymentMethod === 'ton' ? 'TON' : 'USDT (TRC20)' })}
         </button>
       </div>
     </div>
