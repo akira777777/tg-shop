@@ -48,17 +48,25 @@ export async function notifyNewOrder(params: {
   itemCount: number;
   username?: string;
   firstName?: string;
+  itemNames?: string[];
 }): Promise<void> {
-  const { orderId, userId, totalUsdt, itemCount, username, firstName } = params;
+  const { orderId, userId, totalUsdt, itemCount, username, firstName, itemNames } = params;
   const userLabel = username
     ? `@${escapeHtml(username)}`
     : firstName ? escapeHtml(firstName) : `#${userId}`;
+
+  let itemsLine = `📦 Позиций: ${itemCount}`;
+  if (itemNames && itemNames.length > 0) {
+    const displayed = itemNames.slice(0, 3).map((n) => escapeHtml(n));
+    const suffix = itemNames.length > 3 ? ` и ещё ${itemNames.length - 3}` : '';
+    itemsLine = `📦 Товары: ${displayed.join(', ')}${suffix}`;
+  }
 
   const text =
     `🛒 <b>Новый заказ #${orderId}</b>\n\n` +
     `👤 Покупатель: ${userLabel}\n` +
     `💰 Сумма: $${totalUsdt} USDT\n` +
-    `📦 Позиций: ${itemCount}`;
+    itemsLine;
 
   const results = await Promise.allSettled(
     ADMIN_IDS.map((adminId) =>
@@ -90,6 +98,7 @@ export async function notifyOrderStatusChanged(
   status: string,
 ): Promise<void> {
   const messages: Partial<Record<string, string>> = {
+    awaiting_payment: '💳 Ожидание оплаты. Переведите указанную сумму на адрес из вашего заказа.',
     processing: '⚙️ Ваш заказ принят в обработку.',
     shipped: '🚚 Ваш заказ отправлен!',
     delivered: '📦 Ваш заказ доставлен! Спасибо за покупку.',
@@ -98,8 +107,29 @@ export async function notifyOrderStatusChanged(
   };
   const msg = messages[status];
   if (!msg) return;
-  await tgSend(userId, `${msg}\n\n<b>Заказ #${orderId}</b>`).catch((err) =>
+
+  const replyMarkup = status === 'awaiting_payment'
+    ? { inline_keyboard: [[{ text: '📦 Мой заказ', web_app: { url: `${MINI_APP_URL}/orders` } }]] }
+    : undefined;
+
+  await tgSend(userId, `${msg}\n\n<b>Заказ #${orderId}</b>`, replyMarkup).catch((err) =>
     console.error(`[notify] Failed to notify user ${userId}:`, err),
+  );
+}
+
+export async function notifyExpiryWarning(
+  userId: number,
+  orderId: number,
+  minutesLeft: number,
+): Promise<void> {
+  await tgSend(
+    userId,
+    `⏰ <b>Время оплаты заканчивается!</b>\n\n` +
+      `Заказ <b>#${orderId}</b> будет отменён примерно через ${minutesLeft} мин., если оплата не поступит.\n\n` +
+      `Если вы уже отправили перевод — дождитесь подтверждения в сети.`,
+    { inline_keyboard: [[{ text: '📦 Мой заказ', web_app: { url: `${MINI_APP_URL}/orders` } }]] },
+  ).catch((err) =>
+    console.error(`[notify] Failed to send expiry warning for order ${orderId}:`, err),
   );
 }
 

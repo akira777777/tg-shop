@@ -1,7 +1,8 @@
 import { db } from '@/lib/db';
 import { orders } from '@/lib/db/schema';
 import { eq, and, lt, isNull, inArray } from 'drizzle-orm';
-import { notifyPaymentConfirmed, notifyOrderExpired } from '@/lib/bot/notifications';
+import { notifyPaymentConfirmed, notifyOrderExpired, notifyExpiryWarning } from '@/lib/bot/notifications';
+import { redis } from '@/lib/redis';
 import { invalidateProductsCache } from '@/lib/products-cache';
 import { restoreStock } from '@/lib/restore-stock';
 import { orderComment } from './price';
@@ -46,6 +47,21 @@ export async function checkPendingPayments(): Promise<void> {
     ));
 
   if (pending.length === 0) return;
+
+  // Pre-expiry warnings (>70% of TTL elapsed, still unpaid)
+  const warningThresholdMs = ORDER_TTL_MINUTES * 60 * 1000 * 0.7;
+  for (const order of pending) {
+    if (!order.createdAt || !order.userId) continue;
+    const elapsed = Date.now() - new Date(order.createdAt).getTime();
+    if (elapsed >= warningThresholdMs) {
+      const redisKey = `expiry_warn:${order.id}`;
+      const wasSet = await redis.set(redisKey, '1', { nx: true, ex: ORDER_TTL_MINUTES * 60 });
+      if (wasSet) {
+        const minutesLeft = Math.max(1, Math.round((ORDER_TTL_MINUTES * 60 * 1000 - elapsed) / 60000));
+        await notifyExpiryWarning(order.userId, order.id, minutesLeft).catch(() => {});
+      }
+    }
+  }
 
   // One API call fetches recent txs for all pending orders
   const url = new URL(`${TONCENTER_BASE}/getTransactions`);

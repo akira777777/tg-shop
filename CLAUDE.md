@@ -8,7 +8,6 @@ This project runs **Next.js 16** (canary). APIs, conventions, and file structure
 
 Key Next.js 16 patterns used in this codebase:
 - **`after()`** — imported from `next/server`, used in the webhook route to run bot logic post-response. Not the same as `waitUntil`.
-- **`unstable_instant`** — export from route files to fix slow client-side navigations (see `docs/01-app/02-guides/instant-navigation.mdx`).
 - **React 19** — App Router uses React canary (19.x); server components are the default.
 
 ## Commands
@@ -62,7 +61,7 @@ Two blockchains are supported:
 - **TRC20 USDT** — A pool of pre-funded deposit addresses is seeded from `TRON_DEPOSIT_ADDRESS_POOL` (comma-separated) into a Redis set (`tron:pool:available`). `lib/tron/pool.ts` atomically pops one address per order (`acquireAddress`) and returns it after payment or expiry (`releaseAddress`).
 - **TON** — A single wallet (`TON_WALLET_ADDRESS`) receives all TON payments. Orders are distinguished by a comment in the format `ORDER-{id}`. The TON amount is converted from USDT using a CoinGecko price (cached in Redis as `ton:usd_price`, 5-min TTL). Payments allow up to 1% underpayment to handle price drift.
 
-**TON client-safe utilities**: `lib/ton/shared.ts` exports `orderComment(id)`, `usdtToTon(usdt, price)`, and `toNanoton(ton)`. It has **no server-side imports** and is safe to use in both server and client components. The monitors in `lib/ton/monitor.ts` and the checkout page both import from here.
+**TON utility split**: `lib/ton/shared.ts` exports `orderComment(id)`, `usdtToTon(usdt, price)`, and `toNanoton(ton)` — pure functions with **no server-side imports**, safe for both server and client components. `lib/ton/price.ts` re-exports these same functions plus adds `getTonUsdPrice()` (uses Redis) — use `price.ts` on the server, `shared.ts` on the client.
 
 Payment verification runs every minute via **Upstash QStash** (not a Vercel cron — Hobby plan only allows daily). QStash calls `POST /api/payments/verify` with `Authorization: Bearer <CRON_SECRET>`. Both monitors run in parallel, first expiring stale `awaiting_payment` orders (returning TRC20 addresses to the pool), then polling their respective chain APIs. `vercel.json` is intentionally empty (`{}`).
 

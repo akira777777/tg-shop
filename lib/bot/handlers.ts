@@ -1,6 +1,6 @@
 import { Actions, Button, Card, CardText, LinkButton } from 'chat';
 import type { Adapter, Chat, Thread } from 'chat';
-import { desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { messages as messagesTable, orderItems, orders, products, users } from '@/lib/db/schema';
 import { notifyOrderStatusChanged } from './notifications';
@@ -192,17 +192,101 @@ async function handleHelp(userId: number, isAdmin: boolean): Promise<void> {
   });
 }
 
+/**
+ * Shared command dispatcher — handles /start, /status, /orders, /help.
+ * Returns true if a command was matched, false if the message should fall through.
+ */
+async function dispatchCommand(
+  _bot: Chat<Record<string, Adapter>, ThreadState>,
+  thread: Thread<ThreadState>,
+  message: { text?: string; author: { userId: string; userName: string; fullName: string } },
+): Promise<boolean> {
+  const authorId = parseInt(message.author.userId, 10);
+  const isAdmin = ADMIN_IDS.includes(authorId);
+  const msgText = message.text ?? '';
+
+  if (msgText.startsWith('/start')) {
+    if (isAdmin) {
+      await sendAdminPanel(authorId);
+    } else {
+      await upsertUser(authorId, message.author.userName, message.author.fullName);
+      await sendUserWelcome(authorId);
+    }
+    return true;
+  }
+
+  if (msgText.startsWith('/status')) {
+    await handleStatus(thread, msgText, authorId);
+    return true;
+  }
+
+  if (msgText.startsWith('/orders')) {
+    await handleOrders(authorId);
+    return true;
+  }
+
+  if (msgText.startsWith('/help')) {
+    await handleHelp(authorId, isAdmin);
+    return true;
+  }
+
+  return false;
+}
+
+/** Cancel an order: restore stock, release TRC20 address, invalidate cache.
+ *  Guards against double-cancel and cancelling delivered orders. */
+async function cancelOrder(orderId: number, adminChatId: number): Promise<void> {
+  const [updated] = await db
+    .update(orders)
+    .set({ status: 'cancelled' })
+    .where(and(
+      eq(orders.id, orderId),
+      // Prevent double-cancel (would restore stock twice) and cancelling delivered orders
+      sql`${orders.status} NOT IN ('cancelled', 'delivered')`,
+    ))
+    .returning();
+
+  if (!updated) {
+    await tgSend(adminChatId, '❌ Заказ не найден.');
+    return;
+  }
+
+  const items = await db
+    .select({ productId: orderItems.productId, quantity: orderItems.quantity })
+    .from(orderItems)
+    .where(eq(orderItems.orderId, orderId));
+  await Promise.allSettled(
+    items
+      .filter((i) => i.productId != null)
+      .map((i) =>
+        db.update(products)
+          .set({ stock: sql`${products.stock} + ${i.quantity}` })
+          .where(eq(products.id, i.productId!))
+      )
+  );
+  if (updated.paymentMethod === 'trc20' && updated.paymentAddress) {
+    await releaseAddress(updated.paymentAddress).catch((err) =>
+      console.error(`[cancelOrder] Failed to release address for order ${orderId}:`, err)
+    );
+  }
+  await invalidateProductsCache().catch(() => {});
+
+  await tgSend(adminChatId, `✅ Статус заказа #${orderId} обновлён: ❌ <b>cancelled</b>`);
+
+  if (updated.userId) {
+    await notifyOrderStatusChanged(updated.userId, orderId, 'cancelled');
+  }
+}
+
 export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadState>): void {
   // ── New DM (first contact, thread not yet subscribed) ─────────────────────
   bot.onDirectMessage(async (thread, message) => {
-    const authorId = parseInt(message.author.userId, 10);
-    const isAdmin = ADMIN_IDS.includes(authorId);
-    const msgText = message.text ?? '';
-
     await thread.subscribe();
 
-    if (msgText.startsWith('/start') || msgText === '') {
-      if (isAdmin) {
+    // First-contact with no text (e.g. bot opened without sending a message)
+    if (!message.text) {
+      const authorId = parseInt(message.author.userId, 10);
+      if (ADMIN_IDS.includes(authorId)) {
         await sendAdminPanel(authorId);
       } else {
         await upsertUser(authorId, message.author.userName, message.author.fullName);
@@ -211,20 +295,11 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
       return;
     }
 
-    if (msgText.startsWith('/status')) {
-      await handleStatus(thread, msgText, authorId);
-      return;
-    }
+    if (await dispatchCommand(bot, thread, message)) return;
 
-    if (msgText.startsWith('/orders')) {
-      await handleOrders(authorId);
-      return;
-    }
-
-    if (msgText.startsWith('/help')) {
-      await handleHelp(authorId, isAdmin);
-      return;
-    }
+    const authorId = parseInt(message.author.userId, 10);
+    const isAdmin = ADMIN_IDS.includes(authorId);
+    const msgText = message.text ?? '';
 
     if (isAdmin) {
       await sendAdminPanel(authorId);
@@ -241,30 +316,11 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
 
   // ── Subscribed thread messages ─────────────────────────────────────────────
   bot.onSubscribedMessage(async (thread, message) => {
+    if (await dispatchCommand(bot, thread, message)) return;
+
     const authorId = parseInt(message.author.userId, 10);
     const isAdmin = ADMIN_IDS.includes(authorId);
     const msgText = message.text ?? '';
-
-    if (msgText.startsWith('/start')) {
-      if (isAdmin) await sendAdminPanel(authorId);
-      else await sendUserWelcome(authorId);
-      return;
-    }
-
-    if (msgText.startsWith('/status')) {
-      await handleStatus(thread, msgText, authorId);
-      return;
-    }
-
-    if (msgText.startsWith('/orders')) {
-      await handleOrders(authorId);
-      return;
-    }
-
-    if (msgText.startsWith('/help')) {
-      await handleHelp(authorId, isAdmin);
-      return;
-    }
 
     if (isAdmin) {
       if (msgText === '/cancel') {
@@ -278,9 +334,6 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
         const { pendingUserId, pendingUserLabel } = state;
         await thread.setState({});
         try {
-          // Use raw Telegram API (tgSend) instead of Chat SDK openDM().post() —
-          // openDM is unreliable in serverless because it depends on Chat SDK
-          // thread state being properly initialized across cold starts.
           await tgSend(
             pendingUserId,
             `💬 <b>Ответ менеджера:</b>\n\n${escapeHtml(msgText)}`,
@@ -290,6 +343,22 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
             .insert(messagesTable)
             .values({ userId: pendingUserId, direction: 'admin_to_user', content: msgText })
             .catch((err) => console.error('[relay] DB insert failed:', err));
+
+          // Notify other admins that a reply was sent
+          const otherAdmins = ADMIN_IDS.filter((id) => id !== authorId);
+          if (otherAdmins.length > 0) {
+            const adminLabel = message.author.userName
+              ? `@${escapeHtml(message.author.userName)}`
+              : escapeHtml(message.author.fullName);
+            await Promise.allSettled(
+              otherAdmins.map((adminId) =>
+                tgSend(
+                  adminId,
+                  `📤 <b>${adminLabel}</b> ответил(а) пользователю <b>${escapeHtml(pendingUserLabel ?? '')}</b>:\n\n<i>${escapeHtml(msgText.slice(0, 200))}</i>`,
+                ),
+              ),
+            );
+          }
         } catch (err) {
           console.error('[relay] Failed to deliver admin reply:', err);
           await thread.post('❌ Не удалось доставить сообщение пользователю.');
@@ -361,7 +430,7 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
       return;
     }
 
-    // Admin: Recent dialogs
+    // Admin: Recent dialogs (with message counts and timestamps)
     if (actionId === 'admin_dialogs') {
       if (!ADMIN_IDS.includes(authorId)) return;
 
@@ -369,6 +438,7 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
         .select({
           userId: messagesTable.userId,
           content: messagesTable.content,
+          createdAt: messagesTable.createdAt,
           username: users.username,
           firstName: users.firstName,
         })
@@ -376,10 +446,12 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
         .leftJoin(users, eq(messagesTable.userId, users.telegramId))
         .where(eq(messagesTable.direction, 'user_to_admin'))
         .orderBy(desc(messagesTable.createdAt))
-        .limit(20);
+        .limit(30);
 
       if (!recent.length) {
-        await thread?.post('📭 Сообщений от пользователей пока нет.');
+        await tgSend(authorId, '📭 Сообщений от пользователей пока нет.', {
+          inline_keyboard: [[{ text: '◀️ Назад', callback_data: 'admin_panel' }]],
+        });
         return;
       }
 
@@ -392,57 +464,112 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
         unique.push(m);
       }
 
+      // Get per-user total message counts
+      const userIds = unique.map((m) => m.userId!);
+      const msgCounts = await db
+        .select({
+          userId: messagesTable.userId,
+          total: sql<number>`count(*)::int`,
+        })
+        .from(messagesTable)
+        .where(inArray(messagesTable.userId, userIds))
+        .groupBy(messagesTable.userId);
+      const countMap = new Map(msgCounts.map((c) => [c.userId, c.total]));
+
       const lines = unique.map((m) => {
-        const label = m.username ? `@${m.username}` : (m.firstName ?? `#${m.userId}`);
-        const preview = m.content.slice(0, 50) + (m.content.length > 50 ? '…' : '');
-        return `• **${label}:** _${preview}_`;
+        const label = m.username ? `@${escapeHtml(m.username)}` : (m.firstName ? escapeHtml(m.firstName) : `#${m.userId}`);
+        const preview = m.content.slice(0, 40) + (m.content.length > 40 ? '…' : '');
+        const count = countMap.get(m.userId!) ?? 0;
+        const time = m.createdAt
+          ? m.createdAt.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+          : '—';
+        return `• <b>${label}</b> (${count} сообщ., ${time}):\n  <i>${escapeHtml(preview)}</i>`;
       });
 
-      await thread?.post(
-        Card({
-          title: 'Последние диалоги',
-          children: [
-            CardText(lines.join('\n')),
-            Actions(
-              unique.map((m) => {
-                const label = m.username ? `@${m.username}` : (m.firstName ?? `#${m.userId}`);
-                return Button({ id: `reply_to:${m.userId}`, label: `💬 Ответить ${label}` });
-              }),
-            ),
+      await tgSend(
+        authorId,
+        `💬 <b>Последние диалоги:</b>\n\n${lines.join('\n\n')}`,
+        {
+          inline_keyboard: [
+            ...unique.map((m) => {
+              const label = m.username ? `@${m.username}` : (m.firstName ?? `#${m.userId}`);
+              return [{ text: `💬 Ответить ${label}`, callback_data: `reply_to:${m.userId}` }];
+            }),
+            [{ text: '◀️ Панель', callback_data: 'admin_panel' }],
           ],
-        }),
+        },
       );
       return;
     }
 
-    // Admin: Recent orders list
+    // Admin: back to panel
+    if (actionId === 'admin_panel') {
+      if (!ADMIN_IDS.includes(authorId)) return;
+      await sendAdminPanel(authorId);
+      return;
+    }
+
+    // Admin: Orders — show filter menu
     if (actionId === 'admin_orders') {
       if (!ADMIN_IDS.includes(authorId)) return;
+      await tgSend(
+        authorId,
+        '📦 <b>Заказы — выберите фильтр:</b>',
+        {
+          inline_keyboard: [
+            [
+              { text: '🕐 Ожидают', callback_data: 'admin_orders_f:pending' },
+              { text: '💳 К оплате', callback_data: 'admin_orders_f:awaiting_payment' },
+            ],
+            [
+              { text: '✅ Оплачены', callback_data: 'admin_orders_f:paid' },
+              { text: '⚙️ В обработке', callback_data: 'admin_orders_f:processing' },
+            ],
+            [
+              { text: '🚚 Отправлены', callback_data: 'admin_orders_f:shipped' },
+              { text: '📦 Все', callback_data: 'admin_orders_f:all' },
+            ],
+          ],
+        },
+      );
+      return;
+    }
 
-      const recent = await db.select().from(orders).orderBy(desc(orders.createdAt)).limit(10);
+    // Admin: Filtered orders list
+    if (actionId.startsWith('admin_orders_f:')) {
+      if (!ADMIN_IDS.includes(authorId)) return;
+      const filter = actionId.slice('admin_orders_f:'.length);
+
+      const recent = filter === 'all'
+        ? await db.select().from(orders).orderBy(desc(orders.createdAt)).limit(15)
+        : await db.select().from(orders).where(eq(orders.status, filter)).orderBy(desc(orders.createdAt)).limit(15);
+
       if (!recent.length) {
-        await thread?.post('📭 Заказов пока нет.');
+        await tgSend(authorId, '📭 Заказов с таким статусом нет.', {
+          inline_keyboard: [[{ text: '◀️ Назад к фильтрам', callback_data: 'admin_orders' }]],
+        });
         return;
       }
 
+      const statusLabel = filter === 'all' ? 'все' : filter;
       const lines = recent.map(
-        (o) =>
-          `• #${o.id} — ${STATUS_EMOJI[o.status] ?? '❓'} ${o.status} — $${o.totalUsdt} USDT — User #${o.userId}`,
+        (o) => `• #${o.id} — ${STATUS_EMOJI[o.status] ?? '❓'} ${o.status} — $${o.totalUsdt} USDT — User #${o.userId}`,
       );
 
-      await thread?.post(
-        Card({
-          title: 'Последние заказы',
-          children: [
-            CardText(lines.join('\n')),
-            Actions(recent.map((o) => Button({ id: `admin_order_${o.id}`, label: `📝 #${o.id}` }))),
+      await tgSend(
+        authorId,
+        `📦 <b>Заказы (${escapeHtml(statusLabel)}):</b>\n\n${lines.join('\n')}`,
+        {
+          inline_keyboard: [
+            ...recent.slice(0, 8).map((o) => [{ text: `📝 #${o.id}`, callback_data: `admin_order_${o.id}` }]),
+            [{ text: '◀️ Назад к фильтрам', callback_data: 'admin_orders' }],
           ],
-        }),
+        },
       );
       return;
     }
 
-    // Admin: Set pending reply target
+    // Admin: Set pending reply target (with conversation history)
     if (actionId.startsWith('reply_to:')) {
       if (!ADMIN_IDS.includes(authorId)) return;
       const userId = parseInt(actionId.slice('reply_to:'.length), 10);
@@ -456,10 +583,40 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
         ? `@${userRow.username}`
         : (userRow?.firstName ?? `#${userId}`);
 
-      await thread?.setState({ pendingUserId: userId, pendingUserLabel: userLabel });
-      await thread?.post(
-        `✏️ Напишите ответ для **${userLabel}**\n` +
-          `_Он придёт пользователю анонимно от имени бота._\n\n` +
+      // Fetch last 5 messages (both directions) for context
+      const recentMsgs = await db
+        .select({
+          direction: messagesTable.direction,
+          content: messagesTable.content,
+          createdAt: messagesTable.createdAt,
+        })
+        .from(messagesTable)
+        .where(eq(messagesTable.userId, userId))
+        .orderBy(desc(messagesTable.createdAt))
+        .limit(5);
+
+      let historyBlock = '';
+      if (recentMsgs.length > 0) {
+        const lines = recentMsgs.reverse().map((m) => {
+          const arrow = m.direction === 'user_to_admin' ? '👤' : '🤖';
+          const time = m.createdAt
+            ? m.createdAt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+            : '';
+          const preview = m.content.slice(0, 100) + (m.content.length > 100 ? '…' : '');
+          return `${arrow} ${time} ${escapeHtml(preview)}`;
+        });
+        historyBlock = `\n\n📋 <b>Последние сообщения:</b>\n${lines.join('\n')}\n`;
+      }
+
+      if (!thread) {
+        await tgSend(authorId, '❌ Не удалось начать диалог. Попробуйте /start и повторите.');
+        return;
+      }
+      await thread.setState({ pendingUserId: userId, pendingUserLabel: userLabel });
+      await tgSend(
+        authorId,
+        `✏️ <b>Ответ для ${escapeHtml(userLabel)}</b>${historyBlock}\n` +
+          `<i>Напишите ответ — он придёт пользователю анонимно от имени бота.</i>\n` +
           `Отправьте /cancel чтобы отменить.`,
       );
       return;
@@ -511,6 +668,15 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
       return;
     }
 
+    // Admin: Confirm cancel on a paid order
+    if (actionId.startsWith('confirm_cancel_')) {
+      if (!ADMIN_IDS.includes(authorId)) return;
+      const orderId = parseInt(actionId.slice('confirm_cancel_'.length), 10);
+      if (isNaN(orderId) || orderId <= 0) return;
+      await cancelOrder(orderId, authorId);
+      return;
+    }
+
     // Admin: Apply status change
     if (actionId.startsWith('set_status_')) {
       if (!ADMIN_IDS.includes(authorId)) return;
@@ -530,6 +696,36 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
         return;
       }
 
+      // Guard: cancelling a post-payment order requires confirmation
+      if (newStatus === 'cancelled') {
+        const [currentOrder] = await db
+          .select({ status: orders.status })
+          .from(orders)
+          .where(eq(orders.id, orderId))
+          .limit(1);
+
+        const dangerStatuses = ['paid', 'processing', 'shipped', 'delivered'];
+        if (currentOrder && dangerStatuses.includes(currentOrder.status)) {
+          const statusEmoji = STATUS_EMOJI[currentOrder.status] ?? '';
+          await tgSend(
+            authorId,
+            `⚠️ <b>Внимание!</b> Заказ #${orderId} в статусе <b>${statusEmoji} ${escapeHtml(currentOrder.status)}</b>.\n\n` +
+              `Отмена может потребовать возврат средств или отзыв доставки.\nВы уверены?`,
+            {
+              inline_keyboard: [
+                [{ text: '❌ Да, отменить', callback_data: `confirm_cancel_${orderId}` }],
+                [{ text: '◀️ Назад', callback_data: `admin_order_${orderId}` }],
+              ],
+            },
+          );
+          return;
+        }
+
+        // Pre-payment cancel — proceed directly
+        await cancelOrder(orderId, authorId);
+        return;
+      }
+
       const [updated] = await db
         .update(orders)
         .set({ status: newStatus, ...(newStatus === 'paid' ? { paidAt: new Date() } : {}) })
@@ -539,27 +735,6 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
       if (!updated) {
         await thread?.post('❌ Заказ не найден.');
         return;
-      }
-
-      // Restore stock and release TRC20 address when admin cancels an order
-      if (newStatus === 'cancelled') {
-        const items = await db
-          .select({ productId: orderItems.productId, quantity: orderItems.quantity })
-          .from(orderItems)
-          .where(eq(orderItems.orderId, orderId));
-        await Promise.allSettled(
-          items
-            .filter((i) => i.productId != null)
-            .map((i) =>
-              db.update(products)
-                .set({ stock: sql`${products.stock} + ${i.quantity}` })
-                .where(eq(products.id, i.productId!))
-            )
-        );
-        if (updated.paymentMethod === 'trc20' && updated.paymentAddress) {
-          await releaseAddress(updated.paymentAddress).catch(() => {});
-        }
-        await invalidateProductsCache().catch(() => {});
       }
 
       await thread?.post(

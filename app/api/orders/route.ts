@@ -283,6 +283,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       itemCount: resolvedItems.length,
       username: user.username,
       firstName: user.first_name,
+      itemNames: resolvedItems.map((item) => productMap.get(item.productId)!.name),
     }).catch((err) => console.error('[notify] New order notification failed:', err));
 
     return NextResponse.json({
