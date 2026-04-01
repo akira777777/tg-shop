@@ -99,6 +99,7 @@ const dict = {
   'nav.cart': { ru: 'Корзина', en: 'Cart' },
   'nav.orders': { ru: 'Заказы', en: 'Orders' },
   'nav.idea': { ru: 'Идея', en: 'Idea' },
+  'nav.admin': { ru: 'Админ', en: 'Admin' },
 
   // Status labels
   'status.pending': { ru: '🕐 Ожидание', en: '🕐 Pending' },
