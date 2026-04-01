@@ -2,10 +2,12 @@
 
 import Link from 'next/link';
 import { useCart } from '@/lib/cart-store';
+import { useShallow } from 'zustand/react/shallow';
+import { useT } from '@/lib/i18n';
 
 export function CartFab() {
-  const items = useCart((s) => s.items);
-  const total = useCart((s) => s.total);
+  const t = useT();
+  const { items, total } = useCart(useShallow((s) => ({ items: s.items, total: s.total })));
   const count = items.reduce((sum, i) => sum + i.quantity, 0);
 
   if (count === 0) return null;
@@ -16,7 +18,7 @@ export function CartFab() {
         <div className="flex items-center gap-3 bg-primary text-primary-foreground rounded-2xl px-5 py-3 shadow-lg glow-primary font-medium text-sm">
           <span className="flex items-center gap-1.5">
             <span className="bg-primary-foreground/20 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold">{count}</span>
-            Корзина
+            {t('nav.cart')}
           </span>
           <span className="w-px h-4 bg-primary-foreground/20" />
           <span className="font-bold">${total().toFixed(2)}</span>
