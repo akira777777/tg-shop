@@ -4,6 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 @AGENTS.md
 
+## Next.js 16 — Read Bundled Docs First
+
+This project runs **Next.js 16** (canary). APIs, conventions, and file structure differ from training data. Before writing or modifying any Next.js code, **read the relevant guide in `node_modules/next/dist/docs/`** — it is the source of truth.
+
+Key Next.js 16 patterns used in this codebase:
+- **`after()`** — imported from `next/server`, used in the webhook route to run bot logic post-response. Not the same as `waitUntil`.
+- **`unstable_instant`** — export from route files to fix slow client-side navigations (see `docs/01-app/02-guides/instant-navigation.mdx`).
+- **React 19** — App Router uses React canary (19.x); server components are the default.
+
 ## Commands
 
 ```bash
@@ -29,6 +38,7 @@ No test suite is configured.
 - **UI components**: `@base-ui/react` (headless, Radix/MUI lineage) — **not shadcn/ui**. Custom wrappers live in `components/ui/`. `cn()` exists in `lib/utils.ts` (clsx + tailwind-merge). Do not assume other shadcn primitives exist.
 - **Zod v4** (`^4.3.6`): Error shape API differs from v3. Use `.flatten()` from `z.ZodError` — `error.flatten()` returns `{ formErrors, fieldErrors }` as in v3, but import paths changed. Use `import { z } from 'zod'` (not `zod/v3`).
 - **Tailwind CSS v4**: Config uses `@tailwindcss/postcss`, not the v3 `tailwind.config.js` approach.
+- **CVA** (`class-variance-authority`): Used for component variant definitions in `components/ui/`.
 
 ## Architecture
 
@@ -80,13 +90,18 @@ The bot uses Vercel's **Chat SDK** (`chat` + `@chat-adapter/telegram`).
   - `onAction` — inline button callbacks: `my_orders`, `contact_manager`, `suggest_product`, `admin_dialogs`, `admin_orders`, `reply_to:<id>`, `admin_order_<id>`, `set_status_<id>_<status>`.
 - **Raw API fallback**: `lib/bot/telegram-api.ts` — `tgSend()` uses direct Telegram Bot API for `web_app` buttons and HTML parse mode, which Chat SDK doesn't expose.
 - **Notifications**: `lib/bot/notifications.ts` — `notifyPaymentConfirmed`, `notifyNewOrder`, `notifyOrderExpired`, `notifyOrderStatusChanged`, `notifyNewSuggestion`. All use `tgSend()`.
-- **Local dev**: `bot-poll.ts` (repo root) creates a **separate** `Chat` instance in polling mode (`mode: 'polling'`, `deleteWebhook: true`). It does not reuse `getBot()` from `lib/bot/index.ts`.
+- **Local dev**: `bot-poll.ts` (repo root) creates a **separate** `Chat` instance in polling mode (`mode: 'polling'`, `deleteWebhook: true`). It does not reuse `getBot()` from `lib/bot/index.ts`. **Warning**: Running `bot-poll.ts` deletes the production webhook. After switching back to production, re-register it:
+  ```bash
+  curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
+    -d "url=https://<DOMAIN>/api/telegram/webhook" \
+    -d "secret_token=<WEBHOOK_SECRET>"
+  ```
 
 Thread state type: `{ pendingUserId?: number; pendingUserLabel?: string }` — used for the admin reply-to-user flow.
 
 ### Database
 
-Drizzle ORM with PostgreSQL (Neon). Schema at `lib/db/schema.ts`. Tables: `users`, `products`, `orders`, `order_items`, `messages`, `suggestions`.
+Drizzle ORM with PostgreSQL (Neon). Schema at `lib/db/schema.ts`, config at `drizzle.config.ts`, migrations output to `./drizzle/`. Tables: `users`, `products`, `orders`, `order_items`, `messages`, `suggestions`.
 
 Order status lifecycle: `pending` → `awaiting_payment` → `paid` → `processing` → `shipped` → `delivered` (or `cancelled`).
 
