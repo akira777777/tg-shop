@@ -57,6 +57,7 @@ export default function OrdersPage() {
       })
       .finally(() => setLoading(false));
     return () => controller.abort();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   if (loading) {

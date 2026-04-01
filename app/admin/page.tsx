@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { getTelegramUser, getInitData } from '@/lib/telegram';
 import { AdminOrders } from './_components/admin-orders';
@@ -8,15 +8,11 @@ import { AdminProducts } from './_components/admin-products';
 import { AdminSuggestions } from './_components/admin-suggestions';
 
 export default function AdminPage() {
-  const [adminId, setAdminId] = useState<number | null>(null);
-  const [unauthorized, setUnauthorized] = useState(false);
   const [activeTab, setActiveTab] = useState('orders');
+  const [unauthorized, setUnauthorized] = useState(false);
 
-  useEffect(() => {
-    const user = getTelegramUser();
-    if (!user) { setUnauthorized(true); return; }
-    setAdminId(user.id);
-  }, []);
+  const user = useMemo(() => getTelegramUser(), []);
+  const adminId = user?.id ?? null;
 
   const authHeaders = useCallback(() => ({
     'x-telegram-init-data': getInitData(),
@@ -24,18 +20,12 @@ export default function AdminPage() {
 
   const onUnauthorized = useCallback(() => setUnauthorized(true), []);
 
-  if (unauthorized) {
+  if (!adminId || unauthorized) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <p className="text-muted-foreground text-center px-8">⛔ Доступ только для администраторов.</p>
-      </div>
-    );
-  }
-
-  if (!adminId) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <p className="text-muted-foreground animate-pulse">Загрузка…</p>
+        <p className="text-muted-foreground text-center px-8">
+          {unauthorized ? '⛔ Доступ только для администраторов.' : 'Загрузка…'}
+        </p>
       </div>
     );
   }
