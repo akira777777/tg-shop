@@ -5,6 +5,7 @@ import { db } from '@/lib/db';
 import { messages as messagesTable, orderItems, orders, products, users } from '@/lib/db/schema';
 import { notifyOrderStatusChanged } from './notifications';
 import { ADMIN_IDS, MINI_APP_URL, tgSend } from './telegram-api';
+import { getUserLocale, tr } from './user-lang';
 import { releaseAddress } from '@/lib/tron/pool';
 import { invalidateProductsCache } from '@/lib/products-cache';
 import { restoreStock } from '@/lib/restore-stock';
@@ -56,17 +57,18 @@ interface ThreadState {
 
 // Uses raw Telegram API so we can send web_app buttons (Chat SDK doesn't expose them)
 async function sendUserWelcome(userId: number): Promise<void> {
+  const locale = await getUserLocale(userId);
   await tgSend(
     userId,
-    'Добро пожаловать в наш магазин! 🛒\n\nПросматривайте каталог и оплачивайте заказы через USDT.',
+    tr('welcome.title', locale),
     {
       inline_keyboard: [
-        [{ text: '🛍️ Открыть каталог', web_app: { url: MINI_APP_URL } }],
+        [{ text: tr('btn.catalog', locale), web_app: { url: MINI_APP_URL } }],
         [
-          { text: '📋 Мои заказы', callback_data: 'my_orders' },
-          { text: '💬 Написать менеджеру', callback_data: 'contact_manager' },
+          { text: tr('btn.my_orders', locale), callback_data: 'my_orders' },
+          { text: tr('btn.contact_mgr', locale), callback_data: 'contact_manager' },
         ],
-        [{ text: '💡 Предложить товар', callback_data: 'suggest_product' }],
+        [{ text: tr('btn.suggest', locale), callback_data: 'suggest_product' }],
       ],
     },
   );
@@ -134,29 +136,34 @@ async function handleStatus(
   msgText: string,
   authorId: number,
 ): Promise<void> {
+  const locale = await getUserLocale(authorId);
   const orderId = parseInt(msgText.replace('/status', '').trim(), 10);
   if (isNaN(orderId)) {
-    await thread.post('Использование: /status <номер_заказа>');
+    await thread.post(tr('orders.status_usage', locale));
     return;
   }
 
   const [order] = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
   if (!order || order.userId !== authorId) {
-    await thread.post('Заказ не найден.');
+    await thread.post(tr('orders.not_found', locale));
     return;
   }
 
   const emoji = STATUS_EMOJI[order.status] ?? '❓';
+  const orderLabel = locale === 'ru' ? 'Заказ' : 'Order';
+  const statusLabel = locale === 'ru' ? 'Статус' : 'Status';
+  const totalLabel = locale === 'ru' ? 'Сумма' : 'Total';
   await thread.post({
     markdown:
-      `**Заказ #${order.id}**\n` +
-      `Статус: ${emoji} ${order.status.replaceAll('_', ' ')}\n` +
-      `Сумма: $${order.totalUsdt} USDT` +
+      `**${orderLabel} #${order.id}**\n` +
+      `${statusLabel}: ${emoji} ${order.status.replaceAll('_', ' ')}\n` +
+      `${totalLabel}: $${order.totalUsdt} USDT` +
       (order.txHash ? `\nTX: \`${order.txHash}\`` : ''),
   });
 }
 
 async function handleOrders(userId: number): Promise<void> {
+  const locale = await getUserLocale(userId);
   const userOrders = await db
     .select()
     .from(orders)
@@ -165,9 +172,9 @@ async function handleOrders(userId: number): Promise<void> {
     .limit(5);
 
   if (!userOrders.length) {
-    await tgSend(userId, '📭 У вас пока нет заказов.', {
+    await tgSend(userId, tr('orders.none', locale), {
       inline_keyboard: [
-        [{ text: '🛍️ Открыть каталог', web_app: { url: MINI_APP_URL } }],
+        [{ text: tr('btn.catalog', locale), web_app: { url: MINI_APP_URL } }],
       ],
     });
     return;
@@ -178,28 +185,17 @@ async function handleOrders(userId: number): Promise<void> {
   );
   await tgSend(
     userId,
-    `📦 <b>Ваши последние заказы:</b>\n\n${lines.join('\n')}\n\nИспользуйте /status &lt;номер&gt; для деталей.`,
+    `${tr('orders.list_title', locale)}\n\n${lines.join('\n')}\n\n${tr('orders.status_hint', locale)}`,
     {
       inline_keyboard: [
-        [{ text: '📋 Все заказы', web_app: { url: `${MINI_APP_URL}/orders` } }],
+        [{ text: tr('btn.all_orders', locale), web_app: { url: `${MINI_APP_URL}/orders` } }],
       ],
     },
   );
 }
 
 async function handleHelp(userId: number, isAdmin: boolean): Promise<void> {
-  const userHelp =
-    `ℹ️ <b>Как пользоваться магазином:</b>\n\n` +
-    `🛍️ Нажмите <b>Меню</b> внизу чата → откроется каталог\n` +
-    `🛒 Добавьте товары в корзину → оформите заказ\n` +
-    `💳 Оплатите USDT (TRC20) или TON\n` +
-    `⏳ Бот уведомит вас, когда оплата подтверждена\n\n` +
-    `<b>Команды:</b>\n` +
-    `/start — Главное меню\n` +
-    `/orders — Мои заказы\n` +
-    `/status &lt;номер&gt; — Статус заказа\n` +
-    `/help — Помощь\n\n` +
-    `💬 Для связи с менеджером — просто напишите сообщение.`;
+  const locale = await getUserLocale(userId);
 
   const adminHelp =
     `👑 <b>Панель администратора:</b>\n\n` +
@@ -210,9 +206,9 @@ async function handleHelp(userId: number, isAdmin: boolean): Promise<void> {
     `/orders — Все заказы\n` +
     `/status &lt;номер&gt; — Детали заказа`;
 
-  await tgSend(userId, isAdmin ? adminHelp : userHelp, {
+  await tgSend(userId, isAdmin ? adminHelp : tr('help.user', locale), {
     inline_keyboard: [
-      [{ text: '🛍️ Открыть каталог', web_app: { url: MINI_APP_URL } }],
+      [{ text: tr('btn.catalog', locale), web_app: { url: MINI_APP_URL } }],
     ],
   });
 }
@@ -315,9 +311,10 @@ async function handleAdminMessage(
     const { userId: pendingUserId, userLabel: pendingUserLabel } = pending;
     await clearPendingReply(authorId);
     try {
+      const recipientLocale = await getUserLocale(pendingUserId);
       await tgSend(
         pendingUserId,
-        `💬 <b>Ответ менеджера:</b>\n\n${escapeHtml(msgText)}`,
+        `${tr('reply.prefix', recipientLocale)}\n\n${escapeHtml(msgText)}`,
       );
       await thread.post(`✅ Ответ отправлен — ${pendingUserLabel}.`);
       await db
@@ -379,7 +376,8 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
     } else {
       await upsertUser(authorId, message.author.userName, message.author.fullName);
       await relayToAdmins(bot, authorId, message.author.fullName, msgText);
-      await thread.post('✅ Ваше сообщение отправлено менеджеру. Ожидайте ответа.');
+      const userLocale = await getUserLocale(authorId);
+      await thread.post(tr('contact.sent', userLocale));
       await db
         .insert(messagesTable)
         .values({ userId: authorId, direction: 'user_to_admin', content: msgText })
@@ -402,7 +400,8 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
 
     // Regular user message relay
     await relayToAdmins(bot, authorId, message.author.fullName, msgText);
-    await thread.post('✅ Ваше сообщение отправлено менеджеру.');
+    const userLocale = await getUserLocale(authorId);
+    await thread.post(tr('contact.sent_short', userLocale));
     await db
       .insert(messagesTable)
       .values({ userId: authorId, direction: 'user_to_admin', content: msgText })
@@ -441,9 +440,8 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
 
     // User: Contact Manager
     if (actionId === 'contact_manager') {
-      await thread?.post(
-        '💬 Просто напишите сообщение, и менеджер ответит вам в ближайшее время.\n\nВаши данные остаются конфиденциальными.',
-      );
+      const locale = await getUserLocale(authorId);
+      await thread?.post(tr('contact.intro', locale));
       return;
     }
 

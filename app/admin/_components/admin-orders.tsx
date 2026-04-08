@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
@@ -40,32 +40,36 @@ export function AdminOrders({ authHeaders, onUnauthorized }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [pendingStatus, setPendingStatus] = useState<Record<number, string>>({});
   const [updatingOrder, setUpdatingOrder] = useState<number | null>(null);
-  const [loaded, setLoaded] = useState(false);
   const [nextCursor, setNextCursor] = useState<number | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string>('');
 
   const loadOrders = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/admin/orders', { headers: authHeaders() });
+      const params = new URLSearchParams();
+      if (statusFilter) params.set('status', statusFilter);
+      const res = await fetch(`/api/admin/orders?${params.toString()}`, { headers: authHeaders() });
       if (res.status === 401) { onUnauthorized(); return; }
       if (!res.ok) { setError(`Ошибка загрузки заказов (HTTP ${res.status})`); return; }
       const json = await res.json() as { data: AdminOrder[]; nextCursor: number | null };
       setOrders(json.data);
       setNextCursor(json.nextCursor);
-      setLoaded(true);
     } catch {
       setError('Не удалось загрузить заказы. Проверьте соединение.');
     } finally {
       setLoading(false);
     }
-  }, [authHeaders, onUnauthorized]);
+  }, [authHeaders, onUnauthorized, statusFilter]);
 
   const loadMore = useCallback(async () => {
     if (!nextCursor) return;
     setLoadingMore(true);
     try {
-      const res = await fetch(`/api/admin/orders?cursor=${nextCursor}`, { headers: authHeaders() });
+      const params = new URLSearchParams();
+      params.set('cursor', String(nextCursor));
+      if (statusFilter) params.set('status', statusFilter);
+      const res = await fetch(`/api/admin/orders?${params.toString()}`, { headers: authHeaders() });
       if (res.status === 401) { onUnauthorized(); return; }
       if (!res.ok) { setError(`Ошибка загрузки (HTTP ${res.status})`); return; }
       const json = await res.json() as { data: AdminOrder[]; nextCursor: number | null };
@@ -76,12 +80,13 @@ export function AdminOrders({ authHeaders, onUnauthorized }: Props) {
     } finally {
       setLoadingMore(false);
     }
-  }, [nextCursor, authHeaders, onUnauthorized]);
+  }, [nextCursor, authHeaders, onUnauthorized, statusFilter]);
 
-  // Auto-load on first render
-  if (!loaded && !loading) {
+  // Auto-load on first render and whenever filter changes
+  useEffect(() => {
     loadOrders();
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter]);
 
   const updateOrderStatus = async (orderId: number) => {
     const newStatus = pendingStatus[orderId];
@@ -106,9 +111,19 @@ export function AdminOrders({ authHeaders, onUnauthorized }: Props) {
 
   return (
     <>
-      <div className="flex justify-end mb-3">
+      <div className="flex items-center gap-2 mb-3">
+        <select
+          className="flex-1 text-xs bg-background border rounded px-2 py-1.5 text-foreground"
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+        >
+          <option value="">Все статусы</option>
+          {STATUS_OPTIONS.map((s) => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
         <Button variant="outline" size="sm" onClick={() => loadOrders()}>
-          🔄 Обновить
+          🔄
         </Button>
       </div>
 

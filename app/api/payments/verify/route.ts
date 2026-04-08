@@ -1,5 +1,4 @@
 import { checkPendingPayments as checkTronPayments } from '@/lib/tron/monitor';
-import { checkPendingPayments as checkTonPayments } from '@/lib/ton/monitor';
 import { NextRequest, NextResponse } from 'next/server';
 import { timingSafeEqual } from 'crypto';
 
@@ -23,11 +22,10 @@ export async function POST(req: NextRequest): Promise<Response> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const results = await Promise.allSettled([checkTronPayments(), checkTonPayments()]);
-  for (const result of results) {
-    if (result.status === 'rejected') {
-      console.error('[cron /api/payments/verify] Monitor threw:', result.reason);
-    }
+  try {
+    await checkTronPayments();
+  } catch (err) {
+    console.error('[cron /api/payments/verify] Monitor threw:', err);
   }
   return NextResponse.json({ ok: true });
 }

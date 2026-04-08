@@ -15,7 +15,6 @@ export default function CartPage() {
   const { items, updateQty, total, clear } = useCart();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'trc20' | 'ton'>('trc20');
 
   async function handleCheckout() {
     const user = getTelegramUser();
@@ -35,7 +34,6 @@ export default function CartPage() {
         },
         body: JSON.stringify({
           items: items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
-          paymentMethod,
         }),
       });
 
@@ -50,10 +48,7 @@ export default function CartPage() {
         orderId: String(data.orderId),
         address: data.paymentAddress,
         total: data.totalUsdt,
-        method: data.paymentMethod,
       });
-      if (data.paymentAmountTon) checkoutParams.set('tonAmount', data.paymentAmountTon);
-      if (data.comment) checkoutParams.set('comment', data.comment);
       router.push(`/checkout?${checkoutParams.toString()}`);
     } catch {
       setError(t('error.network'));
@@ -117,20 +112,8 @@ export default function CartPage() {
           <span className="text-primary">${total().toFixed(2)} USDT</span>
         </div>
 
-        <div className="flex gap-2">
-          {(['trc20', 'ton'] as const).map((method) => (
-            <button
-              key={method}
-              onClick={() => setPaymentMethod(method)}
-              className={`flex-1 text-xs rounded-xl py-2.5 font-semibold border transition-all duration-200 ${
-                paymentMethod === method
-                  ? 'bg-primary/15 text-primary border-primary/40'
-                  : 'bg-muted/40 text-muted-foreground border-border/50 hover:bg-muted/60'
-              }`}
-            >
-              {method === 'trc20' ? '💵 USDT (TRC20)' : '💎 TON'}
-            </button>
-          ))}
+        <div className="rounded-xl bg-primary/10 border border-primary/30 text-primary text-xs font-semibold py-2.5 text-center">
+          💵 Оплата USDT (TRC20)
         </div>
 
         {error && <p className="text-destructive text-sm text-center">{error}</p>}
@@ -139,7 +122,7 @@ export default function CartPage() {
           disabled={loading}
           className="w-full bg-primary text-primary-foreground rounded-xl py-3.5 text-sm font-bold hover:bg-primary/90 active:scale-[0.98] transition-all duration-150 disabled:opacity-50 glow-sm"
         >
-          {loading ? t('cart.creating') : t('cart.payVia', { method: paymentMethod === 'ton' ? 'TON' : 'USDT (TRC20)' })}
+          {loading ? t('cart.creating') : t('cart.payVia', { method: 'USDT (TRC20)' })}
         </button>
       </div>
     </div>

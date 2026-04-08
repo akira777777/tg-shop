@@ -6,9 +6,12 @@ import { getTelegramUser, getInitData } from '@/lib/telegram';
 import { AdminOrders } from './_components/admin-orders';
 import { AdminProducts } from './_components/admin-products';
 import { AdminSuggestions } from './_components/admin-suggestions';
+import { AdminStats } from './_components/admin-stats';
+import { AdminUsers } from './_components/admin-users';
+import { AdminDialogs } from './_components/admin-dialogs';
 
 export default function AdminPage() {
-  const [activeTab, setActiveTab] = useState('orders');
+  const [activeTab, setActiveTab] = useState('stats');
   const [unauthorized, setUnauthorized] = useState(false);
 
   const user = useMemo(() => getTelegramUser(), []);
@@ -38,11 +41,18 @@ export default function AdminPage() {
 
       <div className="px-4 pt-4">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="w-full mb-4">
-            <TabsTrigger value="orders" className="flex-1">Заказы</TabsTrigger>
-            <TabsTrigger value="products" className="flex-1">Товары</TabsTrigger>
-            <TabsTrigger value="suggestions" className="flex-1">Идеи</TabsTrigger>
+          <TabsList className="w-full mb-4 overflow-x-auto no-scrollbar flex">
+            <TabsTrigger value="stats" className="flex-1 text-xs">📊 Обзор</TabsTrigger>
+            <TabsTrigger value="orders" className="flex-1 text-xs">📦 Заказы</TabsTrigger>
+            <TabsTrigger value="products" className="flex-1 text-xs">🛍️ Товары</TabsTrigger>
+            <TabsTrigger value="users" className="flex-1 text-xs">👥 Юзеры</TabsTrigger>
+            <TabsTrigger value="dialogs" className="flex-1 text-xs">💬 Диалоги</TabsTrigger>
+            <TabsTrigger value="suggestions" className="flex-1 text-xs">💡 Идеи</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="stats">
+            <AdminStats authHeaders={authHeaders} onUnauthorized={onUnauthorized} />
+          </TabsContent>
 
           <TabsContent value="orders">
             <AdminOrders authHeaders={authHeaders} onUnauthorized={onUnauthorized} />
@@ -50,6 +60,14 @@ export default function AdminPage() {
 
           <TabsContent value="products">
             <AdminProducts authHeaders={authHeaders} onUnauthorized={onUnauthorized} />
+          </TabsContent>
+
+          <TabsContent value="users">
+            <AdminUsers authHeaders={authHeaders} onUnauthorized={onUnauthorized} />
+          </TabsContent>
+
+          <TabsContent value="dialogs">
+            <AdminDialogs authHeaders={authHeaders} onUnauthorized={onUnauthorized} />
           </TabsContent>
 
           <TabsContent value="suggestions">

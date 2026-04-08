@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getTelegramUser, getInitData } from '@/lib/telegram';
 import { useTelegramBackButton } from '@/lib/use-telegram-nav';
-import { orderComment } from '@/lib/ton/shared';
 import { useT, type TranslationKey } from '@/lib/i18n';
 
 interface OrderItem { name: string; quantity: number; priceUsdt: string }
@@ -14,7 +13,6 @@ interface Order {
   totalUsdt: string;
   paymentMethod: string;
   paymentAddress: string;
-  paymentAmountTon: string | null;
   txHash: string | null;
   createdAt: string;
   paidAt: string | null;
@@ -136,10 +134,7 @@ export default function OrdersPage() {
                         orderId: String(order.id),
                         address: order.paymentAddress,
                         total: order.totalUsdt,
-                        method: order.paymentMethod,
                       });
-                      if (order.paymentAmountTon) p.set('tonAmount', order.paymentAmountTon);
-                      if (order.paymentMethod === 'ton') p.set('comment', orderComment(order.id));
                       router.push(`/checkout?${p.toString()}`);
                     }}
                     className="w-full text-xs text-primary font-semibold bg-primary/10 rounded-xl py-2 active:scale-[0.98] transition-transform"

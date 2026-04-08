@@ -13,15 +13,9 @@ function CheckoutInner() {
   const orderId = params.get('orderId');
   const address = params.get('address');
   const total = params.get('total');
-  const method = params.get('method') ?? 'trc20';
-  const tonAmount = params.get('tonAmount');
-  const comment = params.get('comment');
-
-  const isTon = method === 'ton';
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [copied, setCopied] = useState(false);
-  const [copiedComment, setCopiedComment] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -84,10 +78,8 @@ function CheckoutInner() {
     );
   }
 
-  const displayAmount = isTon && tonAmount
-    ? `${parseFloat(tonAmount).toFixed(2)} TON`
-    : `${parseFloat(total).toFixed(2)} USDT`;
-  const networkLabel = isTon ? 'TON' : 'Tron (TRC20)';
+  const displayAmount = `${parseFloat(total).toFixed(2)} USDT`;
+  const networkLabel = 'Tron (TRC20)';
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -119,12 +111,6 @@ function CheckoutInner() {
                 <span className="text-muted-foreground">{t('checkout.amount')}</span>
                 <span className="font-bold text-primary text-base">{displayAmount}</span>
               </div>
-              {isTon && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">{t('checkout.usdtEquiv')}</span>
-                  <span className="font-medium">${parseFloat(total).toFixed(2)}</span>
-                </div>
-              )}
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">{t('checkout.network')}</span>
                 <span className="font-medium">{networkLabel}</span>
@@ -147,36 +133,10 @@ function CheckoutInner() {
               </button>
             </div>
 
-            {/* TON comment */}
-            {isTon && comment && (
-              <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4 space-y-2">
-                <p className="text-xs text-blue-300 font-semibold">
-                  {t('checkout.commentLabel')}
-                </p>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 text-sm font-mono bg-background/50 rounded-lg px-3 py-1.5 text-blue-200">
-                    {comment}
-                  </code>
-                  <button
-                    onClick={() => copyToClipboard(comment, setCopiedComment)}
-                    className="text-xs bg-blue-500/20 text-blue-300 px-3 py-1.5 rounded-full font-semibold shrink-0 active:scale-95 transition-transform"
-                  >
-                    {copiedComment ? '✓' : t('checkout.copyAddress').split(' ')[0]}
-                  </button>
-                </div>
-                <p className="text-xs text-blue-300/60">
-                  {t('checkout.commentNoMatch')}
-                </p>
-              </div>
-            )}
-
             {/* Warning */}
             <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-2xl p-4">
               <p className="text-xs text-yellow-200/80 leading-relaxed">
-                {isTon
-                  ? t('checkout.warningTon', { amount: tonAmount ? parseFloat(tonAmount).toFixed(2) : '—' })
-                  : t('checkout.warningTrc20', { amount: parseFloat(total).toFixed(2) })
-                }
+                {t('checkout.warningTrc20', { amount: parseFloat(total).toFixed(2) })}
               </p>
             </div>
           </>

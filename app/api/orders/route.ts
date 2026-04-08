@@ -6,7 +6,6 @@ import { z } from 'zod';
 import { notifyNewOrder } from '@/lib/bot/notifications';
 import { invalidateProductsCache } from '@/lib/products-cache';
 import { acquireAddress, releaseAddress } from '@/lib/tron/pool';
-import { getTonUsdPrice, usdtToTon, orderComment } from '@/lib/ton/price';
 import { verifyInitData } from '@/lib/telegram-auth';
 import { redis } from '@/lib/redis';
 
@@ -23,7 +22,6 @@ const CreateOrderSchema = z.object({
       })
     )
     .min(1),
-  paymentMethod: z.enum(['trc20', 'ton']).default('trc20'),
 });
 
 // GET /api/orders — fetch orders for the authenticated user, including items
@@ -140,20 +138,13 @@ export async function POST(req: NextRequest): Promise<Response> {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 422 });
   }
 
-  const { items, paymentMethod } = parsed.data;
+  const { items } = parsed.data;
+  const paymentMethod = 'trc20' as const;
 
   // Acquire payment address before the DB transaction (Redis is outside the DB tx)
   let paymentAddress: string;
   try {
-    if (paymentMethod === 'trc20') {
-      paymentAddress = await acquireAddress();
-    } else {
-      const tonWallet = process.env.TON_WALLET_ADDRESS;
-      if (!tonWallet) {
-        return NextResponse.json({ error: 'TON wallet not configured' }, { status: 500 });
-      }
-      paymentAddress = tonWallet;
-    }
+    paymentAddress = await acquireAddress();
   } catch (err) {
     console.error('[POST /api/orders] Address acquisition failed:', err);
     return NextResponse.json({ error: 'Payment method temporarily unavailable' }, { status: 503 });
@@ -185,11 +176,11 @@ export async function POST(req: NextRequest): Promise<Response> {
       const product = productMap.get(item.productId);
 
       if (!product) {
-        if (paymentMethod === 'trc20') await releaseAddress(paymentAddress).catch(() => {});
+        await releaseAddress(paymentAddress).catch(() => {});
         return NextResponse.json({ error: `Product ${item.productId} not available` }, { status: 400 });
       }
       if (product.stock < item.quantity) {
-        if (paymentMethod === 'trc20') await releaseAddress(paymentAddress).catch(() => {});
+        await releaseAddress(paymentAddress).catch(() => {});
         return NextResponse.json({ error: `Insufficient stock for "${product.name}"` }, { status: 400 });
       }
 
@@ -207,19 +198,6 @@ export async function POST(req: NextRequest): Promise<Response> {
     const totalFrac = totalMicro % MICRO_USDT;
     const totalUsdt = `${totalWhole}.${totalFrac.toString().padStart(6, '0')}`;
 
-    // Compute TON equivalent if needed
-    let paymentAmountTon: string | undefined;
-    if (paymentMethod === 'ton') {
-      try {
-        const tonUsdPrice = await getTonUsdPrice();
-        const tonAmount = usdtToTon(Number(totalMicro) / 1_000_000, tonUsdPrice);
-        paymentAmountTon = tonAmount.toFixed(9);
-      } catch (err) {
-        console.error('[POST /api/orders] TON price fetch failed:', err);
-        return NextResponse.json({ error: 'Failed to fetch TON exchange rate' }, { status: 503 });
-      }
-    }
-
     // Insert order — neon-http does not support db.transaction(), so we manage
     // atomicity manually: insert order first, then items + stock decrements with
     // compensating rollback on any failure.
@@ -231,7 +209,6 @@ export async function POST(req: NextRequest): Promise<Response> {
         totalUsdt,
         paymentMethod,
         paymentAddress,
-        paymentAmountTon: paymentAmountTon ?? null,
       })
       .returning();
     const newOrderId = newOrder.id;
@@ -243,7 +220,7 @@ export async function POST(req: NextRequest): Promise<Response> {
         .set({ status: 'cancelled' })
         .where(eq(orders.id, newOrderId))
         .catch(() => {});
-      if (paymentMethod === 'trc20') await releaseAddress(paymentAddress).catch(() => {});
+      await releaseAddress(paymentAddress).catch(() => {});
     };
 
     try {
@@ -304,14 +281,11 @@ export async function POST(req: NextRequest): Promise<Response> {
       totalUsdt,
       paymentAddress,
       paymentMethod,
-      ...(paymentAmountTon
-        ? { paymentAmountTon, comment: orderComment(newOrderId) }
-        : {}),
     });
   } catch (err) {
     console.error('[POST /api/orders]', err);
     // Release address if it was acquired — sadd is idempotent so double-release is safe
-    if (paymentMethod === 'trc20') await releaseAddress(paymentAddress).catch(() => {});
+    await releaseAddress(paymentAddress).catch(() => {});
     return NextResponse.json({ error: 'Failed to create order' }, { status: 500 });
   }
 }
