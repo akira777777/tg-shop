@@ -9,7 +9,6 @@ interface Dialog {
   username: string | null;
   firstName: string | null;
   lastMessage: string;
-  lastDirection: string;
   lastAt: string;
   totalCount: number;
   userCount: number;
@@ -193,7 +192,6 @@ export function AdminDialogs({ authHeaders, onUnauthorized }: Props) {
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold truncate">{label}</p>
                     <p className="text-xs text-muted-foreground truncate mt-0.5">
-                      {d.lastDirection === 'admin_to_user' ? '🤖 ' : '👤 '}
                       {d.lastMessage.slice(0, 80)}
                       {d.lastMessage.length > 80 ? '…' : ''}
                     </p>

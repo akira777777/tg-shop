@@ -24,11 +24,6 @@ export async function GET(req: NextRequest): Promise<Response> {
           WHERE m2.user_id = ${messages.userId}
           ORDER BY m2.created_at DESC LIMIT 1
         )`,
-        lastDirection: sql<string>`(
-          SELECT direction FROM ${messages} m2
-          WHERE m2.user_id = ${messages.userId}
-          ORDER BY m2.created_at DESC LIMIT 1
-        )`,
         lastAt: sql<Date>`MAX(${messages.createdAt})`,
         totalCount: sql<number>`COUNT(*)::int`,
         userCount: sql<number>`SUM(CASE WHEN ${messages.direction} = 'user_to_admin' THEN 1 ELSE 0 END)::int`,
