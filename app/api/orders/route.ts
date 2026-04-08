@@ -1,4 +1,7 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> a90d99bff877a5962723ddc356bdafc536d69412
 import { db } from '@/lib/db';
 import { orders, orderItems, products, users } from '@/lib/db/schema';
 import { eq, desc, sql, and, gte, inArray } from 'drizzle-orm';
@@ -316,6 +319,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     return NextResponse.json({ error: 'Failed to create order' }, { status: 500 });
   }
 }
+<<<<<<< HEAD
 =======
 import { db } from '@/lib/db';
 import { orders, orderItems, products, users } from '@/lib/db/schema';
@@ -635,3 +639,5 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 }
 >>>>>>> 4c8a2de77a2caa66bec6d535f8ddd0bdf2d933de
+=======
+>>>>>>> a90d99bff877a5962723ddc356bdafc536d69412
