@@ -220,54 +220,67 @@ export async function POST(req: NextRequest): Promise<Response> {
       }
     }
 
-    let newOrderId: number | undefined;
-    try {
-      await db.transaction(async (tx) => {
-        const [newOrder] = await tx
-          .insert(orders)
-          .values({
-            userId: user.id,
-            status: 'pending',
-            totalUsdt,
-            paymentMethod,
-            paymentAddress,
-            paymentAmountTon: paymentAmountTon ?? null,
-          })
-          .returning();
-        newOrderId = newOrder.id;
+    // Insert order — neon-http does not support db.transaction(), so we manage
+    // atomicity manually: insert order first, then items + stock decrements with
+    // compensating rollback on any failure.
+    const [newOrder] = await db
+      .insert(orders)
+      .values({
+        userId: user.id,
+        status: 'awaiting_payment',
+        totalUsdt,
+        paymentMethod,
+        paymentAddress,
+        paymentAmountTon: paymentAmountTon ?? null,
+      })
+      .returning();
+    const newOrderId = newOrder.id;
 
-        await tx.insert(orderItems).values(
-          resolvedItems.map((item) => ({ orderId: newOrder.id, ...item }))
-        );
-
-        // Atomic stock decrement — fails if a concurrent order depleted stock
-        for (const item of resolvedItems) {
-          const [decremented] = await tx
-            .update(products)
-            .set({ stock: sql`${products.stock} - ${item.quantity}` })
-            .where(and(eq(products.id, item.productId), gte(products.stock, item.quantity)))
-            .returning({ id: products.id });
-
-          if (!decremented) {
-            throw new Error(`Stock depleted for product ${item.productId}`);
-          }
-        }
-      });
-    } catch (err: unknown) {
+    // Helper: cancel the order and release the payment address on failure
+    const rollback = async () => {
+      await db
+        .update(orders)
+        .set({ status: 'cancelled' })
+        .where(eq(orders.id, newOrderId))
+        .catch(() => {});
       if (paymentMethod === 'trc20') await releaseAddress(paymentAddress).catch(() => {});
-      const msg = err instanceof Error ? err.message : '';
-      if (msg.startsWith('Stock depleted')) {
+    };
+
+    try {
+      await db.insert(orderItems).values(
+        resolvedItems.map((item) => ({ orderId: newOrderId, ...item }))
+      );
+    } catch (err) {
+      await rollback();
+      throw err;
+    }
+
+    // Atomic stock decrement per item — WHERE stock >= quantity prevents overselling.
+    // Track successfully decremented items so we can restore them if a later item fails.
+    const decremented: { productId: number; quantity: number }[] = [];
+    for (const item of resolvedItems) {
+      const [updated] = await db
+        .update(products)
+        .set({ stock: sql`${products.stock} - ${item.quantity}` })
+        .where(and(eq(products.id, item.productId), gte(products.stock, item.quantity)))
+        .returning({ id: products.id });
+
+      if (!updated) {
+        // Restore already-decremented items
+        for (const d of decremented) {
+          await db
+            .update(products)
+            .set({ stock: sql`${products.stock} + ${d.quantity}` })
+            .where(eq(products.id, d.productId))
+            .catch(() => {});
+        }
+        await rollback();
         return NextResponse.json(
           { error: 'A product sold out during checkout. Please review your cart.' },
           { status: 409 }
         );
       }
-      throw err;
-    }
-
-    // Should never happen — transaction threw before setting newOrderId
-    if (newOrderId === undefined) {
-      return NextResponse.json({ error: 'Failed to create order' }, { status: 500 });
+      decremented.push({ productId: item.productId, quantity: item.quantity });
     }
 
     // Invalidate product cache so next catalog load reflects updated stock
@@ -297,6 +310,8 @@ export async function POST(req: NextRequest): Promise<Response> {
     });
   } catch (err) {
     console.error('[POST /api/orders]', err);
+    // Release address if it was acquired — sadd is idempotent so double-release is safe
+    if (paymentMethod === 'trc20') await releaseAddress(paymentAddress).catch(() => {});
     return NextResponse.json({ error: 'Failed to create order' }, { status: 500 });
   }
 }
