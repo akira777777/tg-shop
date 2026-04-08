@@ -101,7 +101,7 @@ export async function checkPendingPayments(): Promise<void> {
             console.error(`[tron-monitor] Failed to release address for order ${order.id}:`, err)
           );
           if (order.userId) {
-            await notifyPaymentConfirmed(order.userId, order.id, match.transaction_id, 'trc20');
+            await notifyPaymentConfirmed(order.userId, order.id, match.transaction_id);
           }
         }
       }

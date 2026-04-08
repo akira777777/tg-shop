@@ -4,20 +4,17 @@ function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function explorerLink(txHash: string, paymentMethod: 'trc20' | 'ton'): string {
-  return paymentMethod === 'ton'
-    ? `https://tonscan.org/tx/${txHash}`
-    : `https://tronscan.org/#/transaction/${txHash}`;
+function explorerLink(txHash: string): string {
+  return `https://tronscan.org/#/transaction/${txHash}`;
 }
 
 export async function notifyPaymentConfirmed(
   userId: number,
   orderId: number,
   txHash: string,
-  paymentMethod: 'trc20' | 'ton' = 'trc20',
 ): Promise<void> {
-  const network = paymentMethod === 'ton' ? 'TON' : 'TRC20 USDT';
-  const txUrl = explorerLink(txHash, paymentMethod);
+  const network = 'TRC20 USDT';
+  const txUrl = explorerLink(txHash);
 
   await tgSend(
     userId,

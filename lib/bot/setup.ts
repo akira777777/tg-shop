@@ -6,6 +6,7 @@ import 'dotenv/config';
 
 const API = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
 const MINI_APP_URL = process.env.MINI_APP_URL ?? '';
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET ?? '';
 
 async function call(method: string, body: object) {
   const res = await fetch(`${API}/${method}`, {
@@ -67,27 +68,46 @@ async function main() {
 
   // ── Bot description (Russian) ──
   await call('setMyDescription', {
-    description: '🛍️ Магазин с оплатой через USDT (TRC20) и TON.\n\nОткройте каталог, выберите товар и оплатите криптовалютой.',
+    description: '🛍️ Магазин с оплатой через USDT (TRC20).\n\nОткройте каталог, выберите товар и оплатите криптовалютой.',
     language_code: 'ru',
   });
 
   await call('setMyShortDescription', {
-    short_description: 'Магазин с оплатой через USDT и TON',
+    short_description: 'Магазин с оплатой через USDT (TRC20)',
     language_code: 'ru',
   });
 
   // ── Bot description (English) ──
   await call('setMyDescription', {
-    description: '🛍️ Shop with USDT (TRC20) and TON payments.\n\nBrowse the catalog, pick a product, and pay with crypto.',
+    description: '🛍️ Shop with USDT (TRC20) payments.\n\nBrowse the catalog, pick a product, and pay with crypto.',
     language_code: 'en',
   });
 
   await call('setMyShortDescription', {
-    short_description: 'Crypto shop — USDT & TON payments',
+    short_description: 'Crypto shop — USDT (TRC20) payments',
     language_code: 'en',
   });
 
-  console.log('\n🎉 Bot setup complete!');
+  // ── Webhook registration ──
+  if (MINI_APP_URL) {
+    // MINI_APP_URL typically points at the site root, e.g. https://tg-shop.vercel.app/
+    const base = MINI_APP_URL.replace(/\/$/, '');
+    const webhookUrl = `${base}/api/telegram/webhook`;
+    await call('setWebhook', {
+      url: webhookUrl,
+      ...(WEBHOOK_SECRET ? { secret_token: WEBHOOK_SECRET } : {}),
+      drop_pending_updates: false,
+      allowed_updates: ['message', 'edited_message', 'callback_query'],
+    });
+    console.log(`   → webhook set to ${webhookUrl}`);
+
+    const info = await call('getWebhookInfo', {});
+    console.log('   → webhook info:', JSON.stringify(info.result, null, 2));
+  } else {
+    console.warn('⚠️ MINI_APP_URL not set — skipping webhook registration');
+  }
+
+  console.log('\n🎉 Bot setup complete! The bot is live and will handle updates via webhook.');
 }
 
 main().catch((err) => {

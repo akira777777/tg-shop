@@ -24,12 +24,9 @@ export async function GET(req: NextRequest): Promise<Response> {
   }
 
   try {
-    const paidStatuses = ['paid', 'processing', 'shipped', 'delivered'];
-
     // Build filter
     const filters = [];
     if (search) {
-      // Match username, firstName, or exact telegramId
       const numeric = parseInt(search, 10);
       const conditions = [
         ilike(users.username, `%${search}%`),
@@ -55,7 +52,7 @@ export async function GET(req: NextRequest): Promise<Response> {
         totalSpent: sql<string>`(
           SELECT COALESCE(SUM(${orders.totalUsdt}), 0)::text FROM ${orders}
           WHERE ${orders.userId} = ${users.telegramId}
-            AND ${orders.status} = ANY(${paidStatuses})
+            AND ${orders.status} IN ('paid','processing','shipped','delivered')
         )`,
         lastOrderAt: sql<Date | null>`(
           SELECT MAX(${orders.createdAt}) FROM ${orders}
@@ -63,7 +60,7 @@ export async function GET(req: NextRequest): Promise<Response> {
         )`,
       })
       .from(users)
-      .where(filters.length > 0 ? sql`${sql.join(filters, sql` AND `)}` : undefined)
+      .where(filters.length > 0 ? sql.join(filters, sql` AND `) : undefined)
       .orderBy(desc(users.telegramId))
       .limit(PAGE_SIZE + 1);
 

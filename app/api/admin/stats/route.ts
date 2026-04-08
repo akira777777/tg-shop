@@ -66,7 +66,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       .where(gte(orders.createdAt, startOfToday));
 
     // Totals
-    const [[usersRow], [productsRow], [activeProductsRow], [lowStockRow], [messagesRow], [suggestionsRow]] = await Promise.all([
+    const [usersRows, productsRows, activeProductsRows, lowStockRows, messagesRows, suggestionsRows] = await Promise.all([
       db.select({ count: sql<number>`count(*)::int` }).from(users),
       db.select({ count: sql<number>`count(*)::int` }).from(products),
       db.select({ count: sql<number>`count(*)::int` }).from(products).where(eq(products.active, true)),
@@ -74,6 +74,12 @@ export async function GET(req: NextRequest): Promise<Response> {
       db.select({ count: sql<number>`count(*)::int` }).from(messages),
       db.select({ count: sql<number>`count(*)::int` }).from(suggestions),
     ]);
+    const usersRow = usersRows[0];
+    const productsRow = productsRows[0];
+    const activeProductsRow = activeProductsRows[0];
+    const lowStockRow = lowStockRows[0];
+    const messagesRow = messagesRows[0];
+    const suggestionsRow = suggestionsRows[0];
 
     // Top 5 bestsellers by quantity (paid+ orders only)
     const topProducts = await db

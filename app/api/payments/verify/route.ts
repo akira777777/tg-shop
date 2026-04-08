@@ -1,4 +1,5 @@
 import { checkPendingPayments as checkTronPayments } from '@/lib/tron/monitor';
+import { ensureWebhook } from '@/lib/bot/ensure-webhook';
 import { NextRequest, NextResponse } from 'next/server';
 import { timingSafeEqual } from 'crypto';
 
@@ -22,10 +23,12 @@ export async function POST(req: NextRequest): Promise<Response> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  try {
-    await checkTronPayments();
-  } catch (err) {
-    console.error('[cron /api/payments/verify] Monitor threw:', err);
+  // Run TRC20 monitor + webhook self-heal in parallel
+  const results = await Promise.allSettled([checkTronPayments(), ensureWebhook()]);
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      console.error('[cron /api/payments/verify] Task threw:', result.reason);
+    }
   }
   return NextResponse.json({ ok: true });
 }

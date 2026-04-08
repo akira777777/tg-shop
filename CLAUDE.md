@@ -31,7 +31,7 @@ DATABASE_URL='postgresql://...' npm run db:push
 
 No test suite is configured.
 
-**`DEPLOY.md` is partially stale** — it lists `UPSTASH_REDIS_URL` as required and describes `vercel.json` cron config. Both are outdated. The current setup uses only the REST client (`UPSTASH_REDIS_REST_URL`/`_TOKEN`) and QStash for scheduling. Trust this file over `DEPLOY.md`.
+Installation and deployment is documented in **README.md** — user-facing guide in Russian with env vars, QStash setup, and admin panel walkthrough.
 
 ## Key Library Notes
 
@@ -56,18 +56,15 @@ For local development outside Telegram, set `NEXT_PUBLIC_ALLOW_DEV_AUTH=true` an
 
 ### Payment Flow
 
-Two blockchains are supported:
+**Only TRC20 USDT is supported.** (TON was removed — see git history; DB columns `paymentAmountTon` and `payment_method` are retained for historical rows but new orders are always `trc20`.)
 
-- **TRC20 USDT** — A pool of pre-funded deposit addresses is seeded from `TRON_DEPOSIT_ADDRESS_POOL` (comma-separated) into a Redis set (`tron:pool:available`). `lib/tron/pool.ts` atomically pops one address per order (`acquireAddress`) and returns it after payment or expiry (`releaseAddress`).
-- **TON** — A single wallet (`TON_WALLET_ADDRESS`) receives all TON payments. Orders are distinguished by a comment in the format `ORDER-{id}`. The TON amount is converted from USDT using a CoinGecko price (cached in Redis as `ton:usd_price`, 5-min TTL). Payments allow up to 1% underpayment to handle price drift.
+- A pool of pre-funded deposit addresses is seeded from `TRON_DEPOSIT_ADDRESS_POOL` (comma-separated) into a Redis set (`tron:pool:available`). `lib/tron/pool.ts` atomically pops one address per order (`acquireAddress`) and returns it after payment or expiry (`releaseAddress`).
 
-**TON utility split**: `lib/ton/shared.ts` exports `orderComment(id)`, `usdtToTon(usdt, price)`, and `toNanoton(ton)` — pure functions with **no server-side imports**, safe for both server and client components. `lib/ton/price.ts` re-exports these same functions plus adds `getTonUsdPrice()` (uses Redis) — use `price.ts` on the server, `shared.ts` on the client.
-
-Payment verification runs every minute via **Upstash QStash** (not a Vercel cron — Hobby plan only allows daily). QStash calls `POST /api/payments/verify` with `Authorization: Bearer <CRON_SECRET>`. Both monitors run in parallel, first expiring stale `awaiting_payment` orders (returning TRC20 addresses to the pool), then polling their respective chain APIs. `vercel.json` is intentionally empty (`{}`).
+Payment verification runs every minute via **Upstash QStash** (not a Vercel cron — Hobby plan only allows daily). QStash calls `POST /api/payments/verify` with `Authorization: Bearer <CRON_SECRET>`. The cron first expires stale `awaiting_payment` orders (returning TRC20 addresses to the pool), then polls TronGrid for new transactions, **and** runs `ensureWebhook()` (`lib/bot/ensure-webhook.ts`) to self-heal the Telegram webhook registration. `vercel.json` is intentionally empty (`{}`).
 
 To set up the QStash schedule: create a schedule in the Upstash console (or via API) with `rate: every 1 minute`, target URL `https://<your-domain>/api/payments/verify`, and header `Authorization: Bearer <CRON_SECRET>`.
 
-TRC20 uses idempotency on `txHash IS NULL` before marking paid. Both monitors call `notifyPaymentConfirmed()` on success.
+TRC20 uses idempotency on `txHash IS NULL` before marking paid. On success `notifyPaymentConfirmed()` is called.
 
 ### Caching (Redis)
 
@@ -75,7 +72,8 @@ TRC20 uses idempotency on `txHash IS NULL` before marking paid. Both monitors ca
 |---|---|---|
 | `catalog:products` | 5 min | Product list (`lib/products-cache.ts`); invalidated on any admin product write **and** on new order creation (stock changes) |
 | `tron:pool:available` | permanent | Redis set of available TRC20 deposit addresses |
-| `ton:usd_price` | 5 min | TON/USD rate from CoinGecko |
+| `user_lang:<id>` | permanent | User bot locale (`ru`/`en`), set from webhook `language_code` or `/api/user/lang` |
+| `bot:webhook_ok` | 5 min | Healthy-state cache for `ensureWebhook()` self-healer |
 | `ratelimit:orders:{userId}` | 60 s | Order creation rate limit counter — max 5 orders per 60 s per user (set on first hit via `INCR`/`EXPIRE`) |
 | `expiry_warn:<orderId>` | ORDER_TTL_MINUTES × 60 s | Prevents duplicate pre-expiry payment warnings (SET NX) |
 
@@ -126,7 +124,7 @@ All UI strings go through `lib/i18n.ts`. To add a string: add a key to the `dict
 
 ### Monetary Precision
 
-All prices are stored as `numeric(18,6)` (USDT) or `numeric(18,9)` (TON amounts). Payment monitors convert USDT to BigInt microsatoshis (`value * 1_000_000`) for comparison — never use floating-point arithmetic when matching payment amounts.
+All prices are stored as `numeric(18,6)` (USDT). The TRC20 monitor converts USDT to BigInt microsatoshis (`value * 1_000_000`) for comparison — never use floating-point arithmetic when matching payment amounts.
 
 ### TRC20 Address Pool
 
@@ -135,7 +133,7 @@ All prices are stored as `numeric(18,6)` (USDT) or `numeric(18,9)` (TON amounts)
 ### Redis Clients
 
 A single `@upstash/redis` REST client (`UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`) is used for everything:
-- `lib/redis.ts` — product cache, TRC20 pool, TON price cache, rate limiting.
+- `lib/redis.ts` — product cache, TRC20 pool, bot locale, webhook health, rate limiting.
 - Bot thread state (`lib/bot/index.ts`) — uses `createUpstashState()` from `lib/bot/upstash-state.ts`, a custom `StateAdapter` built on the same REST client. Replaces the former `@chat-adapter/state-redis` (ioredis/TCP), which hung on Vercel cold starts because port 6380 is unreachable from serverless. In dev without credentials, falls back to `createMemoryState()` (in-memory, non-persistent).
 
 `UPSTASH_REDIS_URL` (`rediss://...`) is **no longer used**.
@@ -180,14 +178,11 @@ Two workflows in `.github/workflows/`:
 | `TRON_USDT_CONTRACT` | TRC20 USDT contract (defaults to mainnet address) |
 | `TRONGRID_API_KEY` | TronGrid API key |
 | `TRONGRID_API_URL` | TronGrid base URL (optional, defaults to api.trongrid.io) |
-| `TON_WALLET_ADDRESS` | Single TON receiving wallet |
-| `TONCENTER_API_KEY` | TonCenter API key (optional) |
-| `TONCENTER_API_URL` | TonCenter base URL (optional) |
 | `PAYMENT_CONFIRMATIONS_REQUIRED` | TRC20 confirmations before marking paid (default 1) |
 | `DATABASE_URL` | PostgreSQL connection string |
-| `UPSTASH_REDIS_REST_URL` / `_TOKEN` | Redis REST client — address pool, product cache, TON price cache, bot state |
+| `UPSTASH_REDIS_REST_URL` / `_TOKEN` | Redis REST client — address pool, product cache, bot state/locale |
 | `CRON_SECRET` | Authenticates `/api/payments/verify` (sent as `Authorization: Bearer` by QStash) |
 | `QSTASH_TOKEN` | Upstash QStash token — needed to create/manage the every-minute payment verify schedule |
-| `ORDER_TTL_MINUTES` | Order expiry — TRC20 default 30 min, TON default 60 min |
+| `ORDER_TTL_MINUTES` | Order expiry (default 30 min) |
 | `NEXT_PUBLIC_ALLOW_DEV_AUTH` | Set `true` for dev auth bypass (dev only) |
 | `NEXT_PUBLIC_DEV_TELEGRAM_USER_ID` | Synthetic user ID for dev auth bypass |
