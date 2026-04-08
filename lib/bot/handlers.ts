@@ -293,6 +293,64 @@ async function cancelOrder(orderId: number, adminChatId: number): Promise<void> 
   }
 }
 
+// Shared admin message handler — used by both onDirectMessage and
+// onSubscribedMessage. The Chat SDK's "subscribed" state can be lost across
+// serverless cold starts, so admin replies sometimes arrive via onDirectMessage
+// instead of onSubscribedMessage. Both paths must consume the pending-reply.
+async function handleAdminMessage(
+  thread: Thread<ThreadState>,
+  message: { text?: string; author: { userId: string; userName: string; fullName: string } },
+  authorId: number,
+  msgText: string,
+): Promise<void> {
+  if (msgText === '/cancel') {
+    await clearPendingReply(authorId);
+    await thread.post('❌ Ответ отменён.');
+    return;
+  }
+
+  const pending = await getPendingReply(authorId);
+  console.log(`[relay] admin ${authorId} message; pending=`, pending);
+  if (pending?.userId) {
+    const { userId: pendingUserId, userLabel: pendingUserLabel } = pending;
+    await clearPendingReply(authorId);
+    try {
+      await tgSend(
+        pendingUserId,
+        `💬 <b>Ответ менеджера:</b>\n\n${escapeHtml(msgText)}`,
+      );
+      await thread.post(`✅ Ответ отправлен — ${pendingUserLabel}.`);
+      await db
+        .insert(messagesTable)
+        .values({ userId: pendingUserId, direction: 'admin_to_user', content: msgText })
+        .catch((err) => console.error('[relay] DB insert failed:', err));
+
+      const otherAdmins = ADMIN_IDS.filter((id) => id !== authorId);
+      if (otherAdmins.length > 0) {
+        const adminLabel = message.author.userName
+          ? `@${escapeHtml(message.author.userName)}`
+          : escapeHtml(message.author.fullName);
+        await Promise.allSettled(
+          otherAdmins.map((adminId) =>
+            tgSend(
+              adminId,
+              `📤 <b>${adminLabel}</b> ответил(а) пользователю <b>${escapeHtml(pendingUserLabel ?? '')}</b>:\n\n<i>${escapeHtml(msgText.slice(0, 200))}</i>`,
+            ),
+          ),
+        );
+      }
+    } catch (err) {
+      console.error('[relay] Failed to deliver admin reply:', err);
+      await thread.post(
+        `❌ Не удалось доставить сообщение пользователю #${pendingUserId}.\n\n<i>${escapeHtml(String(err))}</i>`,
+      );
+    }
+    return;
+  }
+
+  await sendAdminPanel(authorId);
+}
+
 export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadState>): void {
   // ── New DM (first contact, thread not yet subscribed) ─────────────────────
   bot.onDirectMessage(async (thread, message) => {
@@ -317,7 +375,7 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
     const msgText = message.text ?? '';
 
     if (isAdmin) {
-      await sendAdminPanel(authorId);
+      await handleAdminMessage(thread, message, authorId, msgText);
     } else {
       await upsertUser(authorId, message.author.userName, message.author.fullName);
       await relayToAdmins(bot, authorId, message.author.fullName, msgText);
@@ -338,54 +396,7 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
     const msgText = message.text ?? '';
 
     if (isAdmin) {
-      if (msgText === '/cancel') {
-        await clearPendingReply(authorId);
-        await thread.post('❌ Ответ отменён.');
-        return;
-      }
-
-      const pending = await getPendingReply(authorId);
-      console.log(`[relay] admin ${authorId} message; pending=`, pending);
-      if (pending?.userId) {
-        const { userId: pendingUserId, userLabel: pendingUserLabel } = pending;
-        await clearPendingReply(authorId);
-        try {
-          await tgSend(
-            pendingUserId,
-            `💬 <b>Ответ менеджера:</b>\n\n${escapeHtml(msgText)}`,
-          );
-          await thread.post(`✅ Ответ отправлен — ${pendingUserLabel}.`);
-          await db
-            .insert(messagesTable)
-            .values({ userId: pendingUserId, direction: 'admin_to_user', content: msgText })
-            .catch((err) => console.error('[relay] DB insert failed:', err));
-
-          // Notify other admins that a reply was sent
-          const otherAdmins = ADMIN_IDS.filter((id) => id !== authorId);
-          if (otherAdmins.length > 0) {
-            const adminLabel = message.author.userName
-              ? `@${escapeHtml(message.author.userName)}`
-              : escapeHtml(message.author.fullName);
-            await Promise.allSettled(
-              otherAdmins.map((adminId) =>
-                tgSend(
-                  adminId,
-                  `📤 <b>${adminLabel}</b> ответил(а) пользователю <b>${escapeHtml(pendingUserLabel ?? '')}</b>:\n\n<i>${escapeHtml(msgText.slice(0, 200))}</i>`,
-                ),
-              ),
-            );
-          }
-        } catch (err) {
-          console.error('[relay] Failed to deliver admin reply:', err);
-          await thread.post(
-            `❌ Не удалось доставить сообщение пользователю #${pendingUserId}.\n\n<i>${escapeHtml(String(err))}</i>`,
-          );
-        }
-        return;
-      }
-
-      // No pending reply target — show admin panel so admin knows how to proceed
-      await sendAdminPanel(authorId);
+      await handleAdminMessage(thread, message, authorId, msgText);
       return;
     }
 
