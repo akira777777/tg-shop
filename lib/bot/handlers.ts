@@ -8,6 +8,30 @@ import { ADMIN_IDS, MINI_APP_URL, tgSend } from './telegram-api';
 import { releaseAddress } from '@/lib/tron/pool';
 import { invalidateProductsCache } from '@/lib/products-cache';
 import { restoreStock } from '@/lib/restore-stock';
+import { redis } from '@/lib/redis';
+
+// ── Pending-reply state (Redis-backed, keyed by adminId) ─────────────────────
+// We don't use Chat SDK thread state for this because (a) setState({}) is a
+// no-op merge so state never clears, and (b) it has been unreliable across
+// cold starts. Redis directly is simpler and trivially debuggable.
+const PENDING_REPLY_TTL_S = 60 * 60; // 1 hour
+const pendingReplyKey = (adminId: number) => `pending_reply:${adminId}`;
+type PendingReply = { userId: number; userLabel: string };
+
+async function setPendingReply(adminId: number, target: PendingReply): Promise<void> {
+  await redis.set(pendingReplyKey(adminId), target, { ex: PENDING_REPLY_TTL_S });
+}
+async function getPendingReply(adminId: number): Promise<PendingReply | null> {
+  const raw = await redis.get<PendingReply | string>(pendingReplyKey(adminId));
+  if (!raw) return null;
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) as PendingReply; } catch { return null; }
+  }
+  return raw;
+}
+async function clearPendingReply(adminId: number): Promise<void> {
+  await redis.del(pendingReplyKey(adminId));
+}
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -315,15 +339,16 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
 
     if (isAdmin) {
       if (msgText === '/cancel') {
-        await thread.setState({});
+        await clearPendingReply(authorId);
         await thread.post('❌ Ответ отменён.');
         return;
       }
 
-      const state = (await thread.state) as ThreadState | null;
-      if (state?.pendingUserId) {
-        const { pendingUserId, pendingUserLabel } = state;
-        await thread.setState({});
+      const pending = await getPendingReply(authorId);
+      console.log(`[relay] admin ${authorId} message; pending=`, pending);
+      if (pending?.userId) {
+        const { userId: pendingUserId, userLabel: pendingUserLabel } = pending;
+        await clearPendingReply(authorId);
         try {
           await tgSend(
             pendingUserId,
@@ -352,7 +377,9 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
           }
         } catch (err) {
           console.error('[relay] Failed to deliver admin reply:', err);
-          await thread.post('❌ Не удалось доставить сообщение пользователю.');
+          await thread.post(
+            `❌ Не удалось доставить сообщение пользователю #${pendingUserId}.\n\n<i>${escapeHtml(String(err))}</i>`,
+          );
         }
         return;
       }
@@ -599,11 +626,8 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
         historyBlock = `\n\n📋 <b>Последние сообщения:</b>\n${lines.join('\n')}\n`;
       }
 
-      if (!thread) {
-        await tgSend(authorId, '❌ Не удалось начать диалог. Попробуйте /start и повторите.');
-        return;
-      }
-      await thread.setState({ pendingUserId: userId, pendingUserLabel: userLabel });
+      await setPendingReply(authorId, { userId, userLabel });
+      console.log(`[relay] admin ${authorId} pending reply set → user ${userId} (${userLabel})`);
       await tgSend(
         authorId,
         `✏️ <b>Ответ для ${escapeHtml(userLabel)}</b>${historyBlock}\n` +
