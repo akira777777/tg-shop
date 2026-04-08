@@ -7,6 +7,7 @@ import { notifyOrderStatusChanged } from './notifications';
 import { ADMIN_IDS, MINI_APP_URL, tgSend } from './telegram-api';
 import { releaseAddress } from '@/lib/tron/pool';
 import { invalidateProductsCache } from '@/lib/products-cache';
+import { restoreStock } from '@/lib/restore-stock';
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -251,19 +252,9 @@ async function cancelOrder(orderId: number, adminChatId: number): Promise<void> 
     return;
   }
 
-  const items = await db
-    .select({ productId: orderItems.productId, quantity: orderItems.quantity })
-    .from(orderItems)
-    .where(eq(orderItems.orderId, orderId));
-  await Promise.allSettled(
-    items
-      .filter((i) => i.productId != null)
-      .map((i) =>
-        db.update(products)
-          .set({ stock: sql`${products.stock} + ${i.quantity}` })
-          .where(eq(products.id, i.productId!))
-      )
-  );
+  // Use shared restoreStock util — aggregates by product and handles errors with logging
+  await restoreStock([orderId], 'bot-cancel');
+
   if (updated.paymentMethod === 'trc20' && updated.paymentAddress) {
     await releaseAddress(updated.paymentAddress).catch((err) =>
       console.error(`[cancelOrder] Failed to release address for order ${orderId}:`, err)

@@ -77,6 +77,7 @@ TRC20 uses idempotency on `txHash IS NULL` before marking paid. Both monitors ca
 | `tron:pool:available` | permanent | Redis set of available TRC20 deposit addresses |
 | `ton:usd_price` | 5 min | TON/USD rate from CoinGecko |
 | `ratelimit:orders:{userId}` | 60 s | Order creation rate limit counter — max 5 orders per 60 s per user (set on first hit via `INCR`/`EXPIRE`) |
+| `expiry_warn:<orderId>` | ORDER_TTL_MINUTES × 60 s | Prevents duplicate pre-expiry payment warnings (SET NX) |
 
 ### Telegram Bot (Chat SDK)
 
@@ -85,11 +86,13 @@ The bot uses Vercel's **Chat SDK** (`chat` + `@chat-adapter/telegram`).
 - **Singleton**: `lib/bot/index.ts` — lazy init via `getBot()` (not a direct `bot` export). `getBot()` creates the `Chat` instance on first call and caches it in a module-level variable.
 - **Webhook**: `app/api/telegram/webhook/route.ts` — `POST` handler calls `getBot().webhooks.telegram(request, { waitUntil: (task) => after(() => task) })`. Uses Next.js `after()` (not `waitUntil` directly) so the response returns immediately while bot logic runs post-response.
 - **Handlers**: `lib/bot/handlers.ts` — all bot logic in `registerBotHandlers()`:
-  - `onDirectMessage` — `/start` welcome, `/status <id>` order lookup, user↔admin message relay.
-  - `onSubscribedMessage` — same commands on already-subscribed threads, plus admin reply flow (thread state stores `pendingUserId`).
-  - `onAction` — inline button callbacks: `my_orders`, `contact_manager`, `suggest_product`, `admin_dialogs`, `admin_orders`, `reply_to:<id>`, `admin_order_<id>`, `set_status_<id>_<status>`.
+  - `dispatchCommand()` — shared command router for `/start`, `/status`, `/orders`, `/help`. Used by both `onDirectMessage` and `onSubscribedMessage` to avoid duplication.
+  - `onDirectMessage` — subscribes thread, dispatches commands, relays free-text to admins.
+  - `onSubscribedMessage` — dispatches commands, handles admin reply flow (thread state stores `pendingUserId`), notifies other admins when one replies.
+  - `onAction` — inline button callbacks: `my_orders`, `contact_manager`, `suggest_product`, `admin_dialogs`, `admin_panel`, `admin_orders`, `admin_orders_f:<status>` (filtered orders), `reply_to:<id>` (shows conversation history), `admin_order_<id>`, `set_status_<id>_<status>`, `confirm_cancel_<id>`.
+  - `cancelOrder()` — helper for order cancellation with stock restore, TRC20 address release, and status guard (`WHERE status NOT IN ('cancelled', 'delivered')`).
 - **Raw API fallback**: `lib/bot/telegram-api.ts` — `tgSend()` uses direct Telegram Bot API for `web_app` buttons and HTML parse mode, which Chat SDK doesn't expose.
-- **Notifications**: `lib/bot/notifications.ts` — `notifyPaymentConfirmed`, `notifyNewOrder`, `notifyOrderExpired`, `notifyOrderStatusChanged`, `notifyNewSuggestion`. All use `tgSend()`.
+- **Notifications**: `lib/bot/notifications.ts` — `notifyPaymentConfirmed`, `notifyNewOrder`, `notifyOrderExpired`, `notifyOrderStatusChanged`, `notifyExpiryWarning`, `notifyNewSuggestion`. All use `tgSend()`. Pre-expiry warnings fire at 70% of `ORDER_TTL_MINUTES` and are deduplicated via Redis key `expiry_warn:<orderId>`.
 - **Local dev**: `bot-poll.ts` (repo root) creates a **separate** `Chat` instance in polling mode (`mode: 'polling'`, `deleteWebhook: true`). It does not reuse `getBot()` from `lib/bot/index.ts`. **Warning**: Running `bot-poll.ts` deletes the production webhook. After switching back to production, re-register it:
   ```bash
   curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \

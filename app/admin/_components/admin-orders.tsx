@@ -36,10 +36,12 @@ interface Props {
 export function AdminOrders({ authHeaders, onUnauthorized }: Props) {
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingStatus, setPendingStatus] = useState<Record<number, string>>({});
   const [updatingOrder, setUpdatingOrder] = useState<number | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [nextCursor, setNextCursor] = useState<number | null>(null);
 
   const loadOrders = useCallback(async () => {
     setLoading(true);
@@ -48,7 +50,9 @@ export function AdminOrders({ authHeaders, onUnauthorized }: Props) {
       const res = await fetch('/api/admin/orders', { headers: authHeaders() });
       if (res.status === 401) { onUnauthorized(); return; }
       if (!res.ok) { setError(`Ошибка загрузки заказов (HTTP ${res.status})`); return; }
-      setOrders(await res.json());
+      const json = await res.json() as { data: AdminOrder[]; nextCursor: number | null };
+      setOrders(json.data);
+      setNextCursor(json.nextCursor);
       setLoaded(true);
     } catch {
       setError('Не удалось загрузить заказы. Проверьте соединение.');
@@ -56,6 +60,23 @@ export function AdminOrders({ authHeaders, onUnauthorized }: Props) {
       setLoading(false);
     }
   }, [authHeaders, onUnauthorized]);
+
+  const loadMore = useCallback(async () => {
+    if (!nextCursor) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetch(`/api/admin/orders?cursor=${nextCursor}`, { headers: authHeaders() });
+      if (res.status === 401) { onUnauthorized(); return; }
+      if (!res.ok) { setError(`Ошибка загрузки (HTTP ${res.status})`); return; }
+      const json = await res.json() as { data: AdminOrder[]; nextCursor: number | null };
+      setOrders((prev) => [...prev, ...json.data]);
+      setNextCursor(json.nextCursor);
+    } catch {
+      setError('Не удалось загрузить заказы.');
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [nextCursor, authHeaders, onUnauthorized]);
 
   // Auto-load on first render
   if (!loaded && !loading) {
@@ -144,6 +165,19 @@ export function AdminOrders({ authHeaders, onUnauthorized }: Props) {
               </div>
             </div>
           ))}
+
+          {nextCursor && (
+            <div className="pt-2 text-center">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={loadMore}
+                disabled={loadingMore}
+              >
+                {loadingMore ? 'Загрузка…' : 'Загрузить ещё'}
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </>

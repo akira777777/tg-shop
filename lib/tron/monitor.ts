@@ -1,11 +1,11 @@
 import { db } from '@/lib/db';
 import { orders } from '@/lib/db/schema';
 import { eq, and, lt, isNull, inArray } from 'drizzle-orm';
-import { notifyPaymentConfirmed, notifyOrderExpired, notifyExpiryWarning } from '@/lib/bot/notifications';
-import { redis } from '@/lib/redis';
+import { notifyPaymentConfirmed, notifyOrderExpired } from '@/lib/bot/notifications';
 import { releaseAddress } from './pool';
 import { invalidateProductsCache } from '@/lib/products-cache';
 import { restoreStock } from '@/lib/restore-stock';
+import { sendExpiryWarnings } from '@/lib/monitor-utils';
 
 const USDT_CONTRACT =
   process.env.TRON_USDT_CONTRACT ?? 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
@@ -13,8 +13,9 @@ const TRONGRID_API =
   process.env.TRONGRID_API_URL ?? 'https://api.trongrid.io';
 const CONFIRMATIONS_REQUIRED =
   parseInt(process.env.PAYMENT_CONFIRMATIONS_REQUIRED ?? '1', 10);
+// Default 30 min for TRC20 (addresses are scarce — release them sooner)
 const ORDER_TTL_MINUTES =
-  parseInt(process.env.ORDER_TTL_MINUTES ?? '30', 10);
+  parseInt(process.env.TRON_ORDER_TTL_MINUTES ?? process.env.ORDER_TTL_MINUTES ?? '30', 10);
 
 interface TronGridTx {
   transaction_id: string;
@@ -43,19 +44,7 @@ export async function checkPendingPayments(): Promise<void> {
     ));
 
   // Pre-expiry warnings (>70% of TTL elapsed, still unpaid)
-  const warningThresholdMs = ORDER_TTL_MINUTES * 60 * 1000 * 0.7;
-  for (const order of pending) {
-    if (!order.createdAt || !order.userId) continue;
-    const elapsed = Date.now() - new Date(order.createdAt).getTime();
-    if (elapsed >= warningThresholdMs) {
-      const redisKey = `expiry_warn:${order.id}`;
-      const wasSet = await redis.set(redisKey, '1', { nx: true, ex: ORDER_TTL_MINUTES * 60 });
-      if (wasSet) {
-        const minutesLeft = Math.max(1, Math.round((ORDER_TTL_MINUTES * 60 * 1000 - elapsed) / 60000));
-        await notifyExpiryWarning(order.userId, order.id, minutesLeft).catch(() => {});
-      }
-    }
-  }
+  await sendExpiryWarnings(pending, ORDER_TTL_MINUTES);
 
   for (const order of pending) {
     try {

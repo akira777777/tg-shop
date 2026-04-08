@@ -4,16 +4,34 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { verifyInitData } from '@/lib/telegram-auth';
 import { notifyNewSuggestion } from '@/lib/bot/notifications';
+import { redis } from '@/lib/redis';
 
 const SuggestionSchema = z.object({
   productName: z.string().min(1).max(200),
   description: z.string().max(1000).optional(),
 });
 
+// Max 3 suggestions per user per hour
+const SUGGESTION_RATE_LIMIT = 3;
+const SUGGESTION_RATE_WINDOW = 60 * 60; // 1 hour in seconds
+
 export async function POST(req: NextRequest): Promise<Response> {
   const user = verifyInitData(req.headers.get('x-telegram-init-data') ?? '');
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Rate limit: max SUGGESTION_RATE_LIMIT suggestions per hour per user
+  const rlKey = `ratelimit:suggestions:${user.id}`;
+  const rlPipeline = redis.pipeline();
+  rlPipeline.incr(rlKey);
+  rlPipeline.expire(rlKey, SUGGESTION_RATE_WINDOW, 'NX');
+  const [count] = await rlPipeline.exec<[number, number]>();
+  if (count > SUGGESTION_RATE_LIMIT) {
+    return NextResponse.json(
+      { error: 'Слишком много предложений. Попробуйте позже.' },
+      { status: 429 },
+    );
   }
 
   let body: unknown;

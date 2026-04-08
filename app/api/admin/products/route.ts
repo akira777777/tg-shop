@@ -11,7 +11,12 @@ const CreateProductSchema = z.object({
   description: z.string().max(1000).optional(),
   priceUsdt: z.string().regex(/^\d+(\.\d{1,6})?$/, 'Некорректный формат цены USDT'),
   category: z.string().min(1).max(100).default('General'),
-  imageUrl: z.string().optional(),
+  // Only allow https:// URLs to prevent javascript: or data: injection
+  imageUrl: z
+    .string()
+    .url()
+    .refine((u) => u.startsWith('https://'), { message: 'URL must use HTTPS' })
+    .optional(),
   stock: z.number().int().min(0).default(0),
 });
 
