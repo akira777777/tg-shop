@@ -32,7 +32,9 @@ export async function GET(req: NextRequest): Promise<Response> {
   }
 
   try {
-    const rows = await db
+    // Two narrow queries instead of a 3-table JOIN that returns one row per item.
+    // Avoids cartesian-style row blowup and ships less data over the wire.
+    const orderRows = await db
       .select({
         id: orders.id,
         userId: orders.userId,
@@ -44,60 +46,38 @@ export async function GET(req: NextRequest): Promise<Response> {
         txHash: orders.txHash,
         createdAt: orders.createdAt,
         paidAt: orders.paidAt,
-        itemName: products.name,
-        itemQty: orderItems.quantity,
-        itemPrice: orderItems.priceUsdt,
       })
       .from(orders)
-      .leftJoin(orderItems, eq(orderItems.orderId, orders.id))
-      .leftJoin(products, eq(products.id, orderItems.productId))
       .where(eq(orders.userId, user.id))
       .orderBy(desc(orders.createdAt));
 
-    // Group rows by order — one DB row per item due to the JOIN
-    const orderMap = new Map<
-      number,
-      {
-        id: number;
-        userId: number | null;
-        status: string;
-        totalUsdt: string;
-        paymentMethod: string;
-        paymentAddress: string;
-        paymentAmountTon: string | null;
-        txHash: string | null;
-        createdAt: Date | null;
-        paidAt: Date | null;
-        items: { name: string; quantity: number; priceUsdt: string }[];
-      }
-    >();
+    if (orderRows.length === 0) return NextResponse.json([]);
 
-    for (const row of rows) {
-      if (!orderMap.has(row.id)) {
-        orderMap.set(row.id, {
-          id: row.id,
-          userId: row.userId,
-          status: row.status,
-          totalUsdt: row.totalUsdt,
-          paymentMethod: row.paymentMethod,
-          paymentAddress: row.paymentAddress,
-          paymentAmountTon: row.paymentAmountTon,
-          txHash: row.txHash,
-          createdAt: row.createdAt,
-          paidAt: row.paidAt,
-          items: [],
-        });
-      }
-      if (row.itemName != null && row.itemQty != null && row.itemPrice != null) {
-        orderMap.get(row.id)!.items.push({
-          name: row.itemName,
-          quantity: row.itemQty,
-          priceUsdt: row.itemPrice,
-        });
-      }
+    const orderIds = orderRows.map((o) => o.id);
+    const itemRows = await db
+      .select({
+        orderId: orderItems.orderId,
+        name: products.name,
+        quantity: orderItems.quantity,
+        priceUsdt: orderItems.priceUsdt,
+      })
+      .from(orderItems)
+      .leftJoin(products, eq(products.id, orderItems.productId))
+      .where(inArray(orderItems.orderId, orderIds));
+
+    const itemsByOrder = new Map<number, { name: string; quantity: number; priceUsdt: string }[]>();
+    for (const row of itemRows) {
+      if (row.name == null || row.orderId == null) continue;
+      const list = itemsByOrder.get(row.orderId);
+      const orderId: number = row.orderId;
+      const item = { name: row.name, quantity: row.quantity, priceUsdt: row.priceUsdt };
+      if (list) list.push(item);
+      else itemsByOrder.set(orderId, [item]);
     }
 
-    return NextResponse.json([...orderMap.values()]);
+    return NextResponse.json(
+      orderRows.map((o) => ({ ...o, items: itemsByOrder.get(o.id) ?? [] }))
+    );
   } catch (err) {
     console.error('[GET /api/orders]', err);
     return NextResponse.json({ error: 'Failed to load orders' }, { status: 500 });
