@@ -183,11 +183,15 @@ async function handleOrders(userId: number): Promise<void> {
   const lines = userOrders.map(
     (o) => `${STATUS_EMOJI[o.status] ?? '❓'} <b>#${o.id}</b> — ${o.status.replaceAll('_', ' ')} — $${o.totalUsdt} USDT`,
   );
+  const hasAwaitingPayment = userOrders.some((o) => o.status === 'awaiting_payment');
   await tgSend(
     userId,
     `${tr('orders.list_title', locale)}\n\n${lines.join('\n')}\n\n${tr('orders.status_hint', locale)}`,
     {
       inline_keyboard: [
+        ...(hasAwaitingPayment
+          ? [[{ text: '💳 Оплатить', web_app: { url: `${MINI_APP_URL}/orders` } }]]
+          : []),
         [{ text: tr('btn.all_orders', locale), web_app: { url: `${MINI_APP_URL}/orders` } }],
       ],
     },
@@ -211,6 +215,60 @@ async function handleHelp(userId: number, isAdmin: boolean): Promise<void> {
       [{ text: tr('btn.catalog', locale), web_app: { url: MINI_APP_URL } }],
     ],
   });
+}
+
+/** User-facing cancel: allows owners to cancel their own awaiting_payment/pending orders. */
+async function handleUserCancel(msgText: string, authorId: number): Promise<void> {
+  const locale = await getUserLocale(authorId);
+  const orderId = parseInt(msgText.replace('/cancel', '').trim(), 10);
+  if (isNaN(orderId) || orderId <= 0) {
+    await tgSend(authorId, tr('cancel.usage', locale));
+    return;
+  }
+
+  // Fetch the order and verify ownership
+  const [order] = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
+
+  if (!order || order.userId !== authorId) {
+    await tgSend(authorId, tr('cancel.not_found', locale));
+    return;
+  }
+
+  // Guard: only pending or awaiting_payment may be cancelled by the user
+  const cancellableStatuses = ['pending', 'awaiting_payment'];
+  if (!cancellableStatuses.includes(order.status)) {
+    await tgSend(authorId, tr('cancel.not_allowed', locale, { status: order.status }));
+    return;
+  }
+
+  // Atomically update — re-check status in DB to avoid TOCTOU
+  const [updated] = await db
+    .update(orders)
+    .set({ status: 'cancelled' })
+    .where(
+      and(
+        eq(orders.id, orderId),
+        eq(orders.userId, authorId),
+        sql`${orders.status} IN ('pending', 'awaiting_payment')`,
+      ),
+    )
+    .returning();
+
+  if (!updated) {
+    await tgSend(authorId, tr('cancel.not_found', locale));
+    return;
+  }
+
+  await restoreStock([orderId], 'user-cancel');
+
+  if (updated.paymentMethod === 'trc20' && updated.paymentAddress) {
+    await releaseAddress(updated.paymentAddress).catch((err) =>
+      console.error(`[handleUserCancel] Failed to release address for order ${orderId}:`, err),
+    );
+  }
+
+  await invalidateProductsCache().catch(() => {});
+  await tgSend(authorId, tr('cancel.success', locale, { id: String(orderId) }));
 }
 
 /**
@@ -248,6 +306,11 @@ async function dispatchCommand(
 
   if (msgText.startsWith('/help')) {
     await handleHelp(authorId, isAdmin);
+    return true;
+  }
+
+  if (msgText.startsWith('/cancel')) {
+    await handleUserCancel(msgText, authorId);
     return true;
   }
 
@@ -415,26 +478,7 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
 
     // User: My Orders
     if (actionId === 'my_orders') {
-      const userOrders = await db
-        .select()
-        .from(orders)
-        .where(eq(orders.userId, authorId))
-        .orderBy(desc(orders.createdAt))
-        .limit(5);
-
-      if (!userOrders.length) {
-        await thread?.post('У вас пока нет заказов.');
-        return;
-      }
-      const lines = userOrders.map(
-        (o) =>
-          `• Заказ #${o.id} — ${STATUS_EMOJI[o.status] ?? ''} ${o.status} — $${o.totalUsdt} USDT`,
-      );
-      await thread?.post({
-        markdown:
-          `**Последние ${userOrders.length} заказов:**\n\n${lines.join('\n')}\n\n` +
-          `Используйте /status <id> для подробностей.`,
-      });
+      await handleOrders(authorId);
       return;
     }
 

@@ -113,7 +113,7 @@ export default function CartPage() {
         </div>
 
         <div className="rounded-xl bg-primary/10 border border-primary/30 text-primary text-xs font-semibold py-2.5 text-center">
-          💵 Оплата USDT (TRC20)
+          {t('cart.payTrc20')}
         </div>
 
         {error && <p className="text-destructive text-sm text-center">{error}</p>}

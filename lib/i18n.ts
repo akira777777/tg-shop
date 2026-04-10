@@ -111,6 +111,7 @@ const dict = {
   // Catalog extras
   'catalog.productCount': { ru: '{count} товаров', en: '{count} products' },
   'catalog.loadError': { ru: 'Не удалось загрузить каталог. Попробуйте позже.', en: 'Failed to load catalog. Try again later.' },
+  'catalog.refresh': { ru: 'Обновить', en: 'Refresh' },
 
   // Cart extras
   'cart.itemCount': { ru: '{count} позиций', en: '{count} items' },
@@ -129,6 +130,14 @@ const dict = {
   'orders.goToCatalog': { ru: 'Перейти в каталог', en: 'Go to catalog' },
   'orders.fetchError': { ru: 'Не удалось загрузить заказы.', en: 'Failed to load orders.' },
   'orders.noOrders': { ru: 'Заказов пока нет', en: 'No orders yet' },
+  'orders.cancelBtn': { ru: 'Отменить заказ', en: 'Cancel order' },
+  'orders.confirmCancel': { ru: 'Подтвердить отмену?', en: 'Confirm cancel?' },
+  'orders.cancelling': { ru: 'Отмена…', en: 'Cancelling…' },
+  'orders.cancelError': { ru: 'Не удалось отменить. Попробуйте ещё раз.', en: 'Could not cancel. Please try again.' },
+  'orders.loadMore': { ru: 'Загрузить ещё', en: 'Load more' },
+  'orders.loadingMore': { ru: 'Загрузка…', en: 'Loading…' },
+  'orders.expiresIn': { ru: '⏱ {time} до истечения', en: '⏱ {time} until expiry' },
+  'orders.expired': { ru: '⏰ Срок истёк', en: '⏰ Expired' },
 
   // Suggest extras
   'suggest.nameRequired': { ru: 'Название товара', en: 'Product name' },

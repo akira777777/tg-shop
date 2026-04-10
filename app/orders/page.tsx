@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getTelegramUser, getInitData } from '@/lib/telegram';
+import { getTelegramUser, getInitData, hapticFeedback } from '@/lib/telegram';
 import { useTelegramBackButton } from '@/lib/use-telegram-nav';
 import { useT, type TranslationKey } from '@/lib/i18n';
 
@@ -29,6 +29,15 @@ const STATUS_STYLE: Record<string, { bg: string; text: string; labelKey: Transla
   cancelled:         { bg: 'bg-destructive/15',    text: 'text-destructive',      labelKey: 'status.cancelled' },
 };
 
+const ORDER_TTL_MS = 30 * 60 * 1000;
+
+function formatCountdown(ms: number): string {
+  const totalSecs = Math.floor(ms / 1000);
+  const mins = Math.floor(totalSecs / 60);
+  const secs = totalSecs % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
 export default function OrdersPage() {
   useTelegramBackButton();
   const router = useRouter();
@@ -36,7 +45,20 @@ export default function OrdersPage() {
   const user = useMemo(() => getTelegramUser(), []);
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(!!user);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [cancelPending, setCancelPending] = useState<number | null>(null);
+  const [cancelling, setCancelling] = useState<number | null>(null);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const hasAwaitingPayment = orders.some((o) => o.status === 'awaiting_payment');
+    if (!hasAwaitingPayment) return;
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, [orders]);
 
   useEffect(() => {
     if (!user) return;
@@ -46,7 +68,10 @@ export default function OrdersPage() {
       signal: controller.signal,
     })
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then((data: Order[]) => setOrders(Array.isArray(data) ? data : []))
+      .then((data: { orders: Order[]; nextCursor: number | null }) => {
+        setOrders(Array.isArray(data.orders) ? data.orders : []);
+        setNextCursor(data.nextCursor ?? null);
+      })
       .catch((err) => {
         if (err.name !== 'AbortError') {
           console.error('[orders] Failed to load:', err);
@@ -57,6 +82,55 @@ export default function OrdersPage() {
     return () => controller.abort();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
+
+  async function handleLoadMore() {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const url = `/api/orders?cursor=${nextCursor}`;
+      const res = await fetch(url, {
+        headers: { 'x-telegram-init-data': getInitData() },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: { orders: Order[]; nextCursor: number | null } = await res.json();
+      setOrders((prev) => [...prev, ...(Array.isArray(data.orders) ? data.orders : [])]);
+      setNextCursor(data.nextCursor ?? null);
+    } catch (err) {
+      console.error('[orders] Failed to load more:', err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  async function handleCancel(orderId: number) {
+    if (cancelPending !== orderId) {
+      setCancelPending(orderId);
+      hapticFeedback('impact');
+      return;
+    }
+    setCancelPending(null);
+    setCancelling(orderId);
+    setCancelError(null);
+    try {
+      const res = await fetch(`/api/orders/${orderId}`, {
+        method: 'DELETE',
+        headers: { 'x-telegram-init-data': getInitData() },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setCancelError((data as { error?: string }).error ?? t('orders.cancelError'));
+        return;
+      }
+      hapticFeedback('notification');
+      setOrders((prev) =>
+        prev.map((o) => o.id === orderId ? { ...o, status: 'cancelled' } : o)
+      );
+    } catch {
+      setCancelError(t('orders.cancelError'));
+    } finally {
+      setCancelling(null);
+    }
+  }
 
   if (loading) {
     return (
@@ -100,7 +174,13 @@ export default function OrdersPage() {
           </button>
         </div>
       ) : (
-        <div className="px-4 py-3 space-y-3">
+        <>
+        {cancelError && (
+          <div className="mx-4 mt-3 p-3 bg-destructive/10 border border-destructive/20 rounded-xl">
+            <p className="text-xs text-destructive">{cancelError}</p>
+          </div>
+        )}
+        <div className="px-4 py-3 space-y-3" id="orders-list">
           {orders.map((order) => {
             const style = STATUS_STYLE[order.status] ?? STATUS_STYLE.pending;
             return (
@@ -127,25 +207,67 @@ export default function OrdersPage() {
                 {order.txHash && (
                   <p className="text-xs font-mono text-muted-foreground truncate">TX: {order.txHash}</p>
                 )}
+                {order.status === 'awaiting_payment' && (() => {
+                  const expiresAt = new Date(order.createdAt).getTime() + ORDER_TTL_MS;
+                  const timeLeft = expiresAt - now.getTime();
+                  const isExpired = timeLeft <= 0;
+                  const isWarning = !isExpired && timeLeft <= 5 * 60 * 1000;
+                  return (
+                    <p className={`text-xs font-medium ${isExpired ? 'text-destructive' : isWarning ? 'text-yellow-400' : 'text-muted-foreground'}`}>
+                      {isExpired
+                        ? t('orders.expired')
+                        : t('orders.expiresIn', { time: formatCountdown(timeLeft) })}
+                    </p>
+                  );
+                })()}
                 {order.status === 'awaiting_payment' && (
-                  <button
-                    onClick={() => {
-                      const p = new URLSearchParams({
-                        orderId: String(order.id),
-                        address: order.paymentAddress,
-                        total: order.totalUsdt,
-                      });
-                      router.push(`/checkout?${p.toString()}`);
-                    }}
-                    className="w-full text-xs text-primary font-semibold bg-primary/10 rounded-xl py-2 active:scale-[0.98] transition-transform"
-                  >
-                    {t('orders.showPayment')}
-                  </button>
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => {
+                        const p = new URLSearchParams({
+                          orderId: String(order.id),
+                          address: order.paymentAddress,
+                          total: order.totalUsdt,
+                        });
+                        router.push(`/checkout?${p.toString()}`);
+                      }}
+                      className="w-full text-xs text-primary font-semibold bg-primary/10 rounded-xl py-2 active:scale-[0.98] transition-transform"
+                    >
+                      {t('orders.showPayment')}
+                    </button>
+                    <button
+                      onClick={() => handleCancel(order.id)}
+                      disabled={cancelling === order.id}
+                      className={`w-full text-xs font-semibold rounded-xl py-2 active:scale-[0.98] transition-all disabled:opacity-50 ${
+                        cancelPending === order.id
+                          ? 'bg-destructive/20 text-destructive border border-destructive/30'
+                          : 'bg-muted/60 text-muted-foreground'
+                      }`}
+                    >
+                      {cancelling === order.id
+                        ? t('orders.cancelling')
+                        : cancelPending === order.id
+                        ? t('orders.confirmCancel')
+                        : t('orders.cancelBtn')}
+                    </button>
+                  </div>
                 )}
               </div>
             );
           })}
         </div>
+        {nextCursor !== null && (
+          <div className="px-4 pb-4">
+            <button
+              onClick={handleLoadMore}
+              disabled={loadingMore}
+              className="w-full text-sm font-semibold text-primary bg-primary/10 rounded-xl py-3 active:scale-[0.98] transition-all disabled:opacity-50"
+            >
+              {loadingMore ? t('orders.loadingMore') : t('orders.loadMore')}
+            </button>
+          </div>
+        )}
+        </>
       )}
     </div>
   );

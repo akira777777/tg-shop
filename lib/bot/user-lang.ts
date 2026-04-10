@@ -81,6 +81,7 @@ const dict: Dict = {
       '/start — Главное меню\n' +
       '/orders — Мои заказы\n' +
       '/status &lt;номер&gt; — Статус заказа\n' +
+      '/cancel &lt;номер&gt; — Отменить заказ\n' +
       '/help — Помощь\n\n' +
       '💬 Для связи с менеджером — просто напишите сообщение.',
     en:
@@ -93,11 +94,35 @@ const dict: Dict = {
       '/start — Main menu\n' +
       '/orders — My orders\n' +
       '/status &lt;id&gt; — Order status\n' +
+      '/cancel &lt;id&gt; — Cancel an order\n' +
       '/help — Help\n\n' +
       '💬 To contact a manager — just send a message.',
   },
+
+  'cancel.usage': {
+    ru: 'Использование: /cancel &lt;номер_заказа&gt;',
+    en: 'Usage: /cancel &lt;order_id&gt;',
+  },
+  'cancel.not_found': {
+    ru: 'Заказ не найден или уже отменён.',
+    en: 'Order not found or already cancelled.',
+  },
+  'cancel.success': {
+    ru: '✅ Заказ #{id} отменён.',
+    en: '✅ Order #{id} cancelled.',
+  },
+  'cancel.not_allowed': {
+    ru: 'Заказ нельзя отменить (статус: {status}).',
+    en: 'Order cannot be cancelled (status: {status}).',
+  },
 };
 
-export function tr(key: keyof typeof dict, locale: BotLocale): string {
-  return dict[key][locale] ?? dict[key].en;
+export function tr(key: keyof typeof dict, locale: BotLocale, params?: Record<string, string>): string {
+  let str = dict[key][locale] ?? dict[key].en;
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      str = str.replaceAll(`{${k}}`, v);
+    }
+  }
+  return str;
 }

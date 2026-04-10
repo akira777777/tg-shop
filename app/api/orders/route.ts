@@ -1,6 +1,6 @@
 import { db } from '@/lib/db';
 import { orders, orderItems, products, users } from '@/lib/db/schema';
-import { eq, desc, sql, and, gte, inArray } from 'drizzle-orm';
+import { eq, desc, sql, and, gte, inArray, lt } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { notifyNewOrder } from '@/lib/bot/notifications';
@@ -24,16 +24,34 @@ const CreateOrderSchema = z.object({
     .min(1),
 });
 
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 50;
+
 // GET /api/orders — fetch orders for the authenticated user, including items
+// Supports cursor-based pagination via ?cursor=<orderId>&limit=<n>
 export async function GET(req: NextRequest): Promise<Response> {
   const user = verifyInitData(req.headers.get('x-telegram-init-data') ?? '');
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const { searchParams } = req.nextUrl;
+  const cursorParam = searchParams.get('cursor');
+  const limitParam = searchParams.get('limit');
+
+  const cursor = cursorParam !== null ? parseInt(cursorParam, 10) : null;
+  const rawLimit = limitParam !== null ? parseInt(limitParam, 10) : DEFAULT_LIMIT;
+  const limit = Math.min(isNaN(rawLimit) || rawLimit < 1 ? DEFAULT_LIMIT : rawLimit, MAX_LIMIT);
+
   try {
     // Two narrow queries instead of a 3-table JOIN that returns one row per item.
     // Avoids cartesian-style row blowup and ships less data over the wire.
+    const whereClause =
+      cursor !== null && !isNaN(cursor)
+        ? and(eq(orders.userId, user.id), lt(orders.id, cursor))
+        : eq(orders.userId, user.id);
+
+    // Fetch one extra row to determine whether a next page exists
     const orderRows = await db
       .select({
         id: orders.id,
@@ -48,12 +66,17 @@ export async function GET(req: NextRequest): Promise<Response> {
         paidAt: orders.paidAt,
       })
       .from(orders)
-      .where(eq(orders.userId, user.id))
-      .orderBy(desc(orders.createdAt));
+      .where(whereClause)
+      .orderBy(desc(orders.id))
+      .limit(limit + 1);
 
-    if (orderRows.length === 0) return NextResponse.json([]);
+    const hasMore = orderRows.length > limit;
+    const pageRows = hasMore ? orderRows.slice(0, limit) : orderRows;
+    const nextCursor = hasMore ? pageRows[pageRows.length - 1].id : null;
 
-    const orderIds = orderRows.map((o) => o.id);
+    if (pageRows.length === 0) return NextResponse.json({ orders: [], nextCursor: null });
+
+    const orderIds = pageRows.map((o) => o.id);
     const itemRows = await db
       .select({
         orderId: orderItems.orderId,
@@ -75,9 +98,10 @@ export async function GET(req: NextRequest): Promise<Response> {
       else itemsByOrder.set(orderId, [item]);
     }
 
-    return NextResponse.json(
-      orderRows.map((o) => ({ ...o, items: itemsByOrder.get(o.id) ?? [] }))
-    );
+    return NextResponse.json({
+      orders: pageRows.map((o) => ({ ...o, items: itemsByOrder.get(o.id) ?? [] })),
+      nextCursor,
+    });
   } catch (err) {
     console.error('[GET /api/orders]', err);
     return NextResponse.json({ error: 'Failed to load orders' }, { status: 500 });

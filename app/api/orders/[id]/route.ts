@@ -1,8 +1,11 @@
 import { db } from '@/lib/db';
 import { orders } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyInitData } from '@/lib/telegram-auth';
+import { restoreStock } from '@/lib/restore-stock';
+import { releaseAddress } from '@/lib/tron/pool';
+import { invalidateProductsCache } from '@/lib/products-cache';
 
 // GET /api/orders/:id — fetch a single order for the authenticated user
 export async function GET(
@@ -73,5 +76,58 @@ export async function PATCH(
   } catch (err) {
     console.error('[PATCH /api/orders/:id]', err);
     return NextResponse.json({ error: 'Failed to update order' }, { status: 500 });
+  }
+}
+
+// DELETE /api/orders/:id — user-initiated cancellation (pending/awaiting_payment only)
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+): Promise<Response> {
+  const user = verifyInitData(req.headers.get('x-telegram-init-data') ?? '');
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { id } = await params;
+  const orderId = parseInt(id, 10);
+  if (isNaN(orderId)) return NextResponse.json({ error: 'Invalid order id' }, { status: 400 });
+
+  try {
+    const [updated] = await db
+      .update(orders)
+      .set({ status: 'cancelled' })
+      .where(
+        and(
+          eq(orders.id, orderId),
+          eq(orders.userId, user.id),
+          sql`${orders.status} IN ('pending', 'awaiting_payment')`,
+        )
+      )
+      .returning();
+
+    if (!updated) {
+      const [exists] = await db
+        .select({ id: orders.id, status: orders.status })
+        .from(orders)
+        .where(and(eq(orders.id, orderId), eq(orders.userId, user.id)))
+        .limit(1);
+
+      if (!exists) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Order cannot be cancelled' }, { status: 409 });
+    }
+
+    await restoreStock([orderId], 'user-cancel');
+
+    if (updated.paymentMethod === 'trc20' && updated.paymentAddress) {
+      await releaseAddress(updated.paymentAddress).catch((err) =>
+        console.error(`[DELETE /api/orders/:id] Failed to release address for order ${orderId}:`, err)
+      );
+    }
+
+    await invalidateProductsCache().catch(() => {});
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error('[DELETE /api/orders/:id]', err);
+    return NextResponse.json({ error: 'Failed to cancel order' }, { status: 500 });
   }
 }

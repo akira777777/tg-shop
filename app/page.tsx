@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ProductCard, ProductCardSkeleton } from '@/components/catalog/product-card';
 import { CartFab } from '@/components/catalog/cart-fab';
 import { Input } from '@/components/ui/input';
 import { useT } from '@/lib/i18n';
+import { hapticFeedback } from '@/lib/telegram';
 import type { Product } from '@/lib/types';
 
 export default function CatalogPage() {
@@ -15,7 +16,9 @@ export default function CatalogPage() {
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
-  useEffect(() => {
+  const fetchProducts = useCallback(() => {
+    setLoading(true);
+    setError(null);
     const controller = new AbortController();
     fetch('/api/products', { signal: controller.signal })
       .then((r) => {
@@ -30,6 +33,12 @@ export default function CatalogPage() {
         }
       })
       .finally(() => setLoading(false));
+    return controller;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const controller = fetchProducts();
     return () => controller.abort();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -55,9 +64,19 @@ export default function CatalogPage() {
       <header className="sticky top-0 z-10 glass border-b border-border/50 px-4 py-3 space-y-3">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold tracking-tight">{t('catalog.title')}</h1>
-          {!loading && (
-            <span className="text-xs text-muted-foreground">{t('catalog.productCount', { count: filtered.length })}</span>
-          )}
+          <div className="flex items-center gap-2">
+            {!loading && (
+              <span className="text-xs text-muted-foreground">{t('catalog.productCount', { count: filtered.length })}</span>
+            )}
+            <button
+              onClick={() => { hapticFeedback('impact'); fetchProducts(); }}
+              disabled={loading}
+              aria-label={t('catalog.refresh')}
+              className="w-7 h-7 flex items-center justify-center rounded-full bg-muted/60 text-muted-foreground hover:bg-muted active:scale-90 transition-all disabled:opacity-50"
+            >
+              <span className={loading ? 'animate-spin inline-block' : 'inline-block'}>↻</span>
+            </button>
+          </div>
         </div>
         <div className="relative">
           <Input
