@@ -21,6 +21,26 @@ async function call(method: string, body: object) {
 }
 
 async function main() {
+  // ── Admin-scoped commands (per chat_id) — shows /news in admins' menus only ──
+  const adminIds = (process.env.ADMIN_CHAT_IDS ?? '')
+    .split(',')
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => !isNaN(n));
+
+  for (const adminId of adminIds) {
+    await call('setMyCommands', {
+      commands: [
+        { command: 'start', description: 'Панель администратора' },
+        { command: 'orders', description: 'Все заказы' },
+        { command: 'status', description: 'Детали заказа — /status <номер>' },
+        { command: 'news', description: '📣 Новость в канал' },
+        { command: 'cancel', description: 'Отменить текущее действие' },
+        { command: 'help', description: 'Помощь' },
+      ],
+      scope: { type: 'chat', chat_id: adminId },
+    });
+  }
+
   // ── Bot commands (Russian) ──
   await call('setMyCommands', {
     commands: [

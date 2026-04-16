@@ -2,7 +2,7 @@ import { Actions, Button, Card, CardText, LinkButton } from 'chat';
 import type { Adapter, Chat, Thread } from 'chat';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { messages as messagesTable, orderItems, orders, products, users } from '@/lib/db/schema';
+import { announcements, messages as messagesTable, orderItems, orders, products, users } from '@/lib/db/schema';
 import { notifyOrderStatusChanged } from './notifications';
 import { ADMIN_IDS, MINI_APP_URL, tgSend } from './telegram-api';
 import { getUserLocale, tr } from './user-lang';
@@ -10,6 +10,7 @@ import { releaseAddress } from '@/lib/tron/pool';
 import { invalidateProductsCache } from '@/lib/products-cache';
 import { restoreStock } from '@/lib/restore-stock';
 import { redis } from '@/lib/redis';
+import { isBroadcastConfigured, postAnnouncement } from './broadcast';
 
 // ── Pending-reply state (Redis-backed, keyed by adminId) ─────────────────────
 // We don't use Chat SDK thread state for this because (a) setState({}) is a
@@ -32,6 +33,30 @@ async function getPendingReply(adminId: number): Promise<PendingReply | null> {
 }
 async function clearPendingReply(adminId: number): Promise<void> {
   await redis.del(pendingReplyKey(adminId));
+}
+
+// ── Pending-news state (Redis-backed, keyed by adminId) ──────────────────────
+// Two-stage: 'awaiting_text' (user sent /news) → 'awaiting_confirm' (user sent
+// the body, bot showed preview with Confirm/Cancel buttons).
+const PENDING_NEWS_TTL_S = 30 * 60;
+const pendingNewsKey = (adminId: number) => `pending_news:${adminId}`;
+type PendingNews =
+  | { stage: 'awaiting_text' }
+  | { stage: 'awaiting_confirm'; text: string };
+
+async function setPendingNews(adminId: number, state: PendingNews): Promise<void> {
+  await redis.set(pendingNewsKey(adminId), state, { ex: PENDING_NEWS_TTL_S });
+}
+async function getPendingNews(adminId: number): Promise<PendingNews | null> {
+  const raw = await redis.get<PendingNews | string>(pendingNewsKey(adminId));
+  if (!raw) return null;
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) as PendingNews; } catch { return null; }
+  }
+  return raw;
+}
+async function clearPendingNews(adminId: number): Promise<void> {
+  await redis.del(pendingNewsKey(adminId));
 }
 
 function escapeHtml(text: string): string {
@@ -77,11 +102,12 @@ async function sendUserWelcome(userId: number): Promise<void> {
 async function sendAdminPanel(userId: number): Promise<void> {
   await tgSend(
     userId,
-    '👑 <b>Панель администратора</b>\n\nОтвечайте на сообщения пользователей — ответ придёт анонимно от имени бота.\n\n<i>Нажмите кнопку «Ответить» рядом с пересланным сообщением.</i>',
+    '👑 <b>Панель администратора</b>\n\nОтвечайте на сообщения пользователей — ответ придёт анонимно от имени бота.\n\n<i>Нажмите кнопку «Ответить» рядом с пересланным сообщением.</i>\n\nКоманда <b>/news</b> — отправить объявление в канал.',
     {
       inline_keyboard: [
         [{ text: '💬 Диалоги с пользователями', callback_data: 'admin_dialogs' }],
         [{ text: '📦 Последние заказы', callback_data: 'admin_orders' }],
+        [{ text: '📣 Новость в канал', callback_data: 'admin_news' }],
       ],
     },
   );
@@ -204,11 +230,14 @@ async function handleHelp(userId: number, isAdmin: boolean): Promise<void> {
   const adminHelp =
     `👑 <b>Панель администратора:</b>\n\n` +
     `💬 <b>Диалоги</b> — просмотр сообщений от пользователей\n` +
-    `📦 <b>Заказы</b> — управление статусами\n\n` +
+    `📦 <b>Заказы</b> — управление статусами\n` +
+    `📣 <b>/news</b> — отправить объявление в канал\n\n` +
     `Для ответа пользователю нажмите <b>«Ответить»</b> рядом с его сообщением.\n\n` +
     `/start — Панель администратора\n` +
     `/orders — Все заказы\n` +
-    `/status &lt;номер&gt; — Детали заказа`;
+    `/status &lt;номер&gt; — Детали заказа\n` +
+    `/news — Опубликовать новость в канал\n` +
+    `/cancel — Отменить текущее действие`;
 
   await tgSend(userId, isAdmin ? adminHelp : tr('help.user', locale), {
     inline_keyboard: [
@@ -314,7 +343,52 @@ async function dispatchCommand(
     return true;
   }
 
+  if (msgText.startsWith('/news')) {
+    if (!isAdmin) return false;
+    await handleNewsStart(authorId);
+    return true;
+  }
+
   return false;
+}
+
+async function handleNewsStart(adminId: number): Promise<void> {
+  if (!isBroadcastConfigured()) {
+    await tgSend(
+      adminId,
+      '⚠️ Канал не настроен. Задайте <code>BROADCAST_CHANNEL_ID</code> в окружении и перезапустите бота.',
+    );
+    return;
+  }
+  // Supersede any stale pending reply — admin is switching intent.
+  await clearPendingReply(adminId);
+  await setPendingNews(adminId, { stage: 'awaiting_text' });
+  await tgSend(
+    adminId,
+    '📣 <b>Новая новость для канала</b>\n\nПришлите текст одним сообщением.\n' +
+      'Поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, <code>&lt;a href&gt;</code>.\n\n' +
+      'Отправьте /cancel чтобы отменить.',
+  );
+}
+
+async function showNewsPreview(adminId: number, text: string): Promise<void> {
+  const preview = text.length > 600 ? `${text.slice(0, 600)}…` : text;
+  await tgSend(
+    adminId,
+    '👁 <b>Предпросмотр</b>\n\n' +
+      '<i>Ниже — как пост будет выглядеть в канале:</i>\n\n' +
+      '━━━━━━━━━━━━━━\n' +
+      preview +
+      '\n━━━━━━━━━━━━━━',
+    {
+      inline_keyboard: [
+        [
+          { text: '✅ Отправить в канал', callback_data: 'news_confirm' },
+          { text: '❌ Отмена', callback_data: 'news_cancel' },
+        ],
+      ],
+    },
+  );
 }
 
 /** Cancel an order: restore stock, release TRC20 address, invalidate cache.
@@ -364,7 +438,24 @@ async function handleAdminMessage(
 ): Promise<void> {
   if (msgText === '/cancel') {
     await clearPendingReply(authorId);
-    await thread.post('❌ Ответ отменён.');
+    await clearPendingNews(authorId);
+    await thread.post('❌ Отменено.');
+    return;
+  }
+
+  // News composition has priority over any pending reply, since /news is the
+  // active intent the admin just initiated. During 'awaiting_confirm', any new
+  // text replaces the draft and re-renders the preview — convenient when the
+  // admin notices a typo after seeing the preview.
+  const pendingNews = await getPendingNews(authorId);
+  if (pendingNews) {
+    const text = msgText.trim();
+    if (!text) {
+      await tgSend(authorId, '⚠️ Текст пустой. Пришлите сообщение ещё раз или /cancel.');
+      return;
+    }
+    await setPendingNews(authorId, { stage: 'awaiting_confirm', text });
+    await showNewsPreview(authorId, text);
     return;
   }
 
@@ -577,6 +668,57 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
     if (actionId === 'admin_panel') {
       if (!ADMIN_IDS.includes(authorId)) return;
       await sendAdminPanel(authorId);
+      return;
+    }
+
+    // Admin: start /news from the panel button
+    if (actionId === 'admin_news') {
+      if (!ADMIN_IDS.includes(authorId)) return;
+      await handleNewsStart(authorId);
+      return;
+    }
+
+    // Admin: confirm sending a prepared news post
+    if (actionId === 'news_confirm') {
+      if (!ADMIN_IDS.includes(authorId)) return;
+      const state = await getPendingNews(authorId);
+      if (state?.stage !== 'awaiting_confirm') {
+        await tgSend(authorId, '⚠️ Нет новости в очереди. Начните заново с /news.');
+        return;
+      }
+      const { text } = state;
+      await clearPendingNews(authorId);
+
+      // Insert draft first so a delivery failure still leaves an audit row.
+      const [row] = await db
+        .insert(announcements)
+        .values({ text, createdByAdminId: authorId, source: 'bot_command' })
+        .returning();
+
+      try {
+        const messageId = await postAnnouncement(text);
+        await db
+          .update(announcements)
+          .set({ channelMessageId: messageId, sentAt: new Date(), errorMessage: null })
+          .where(eq(announcements.id, row.id));
+        await tgSend(authorId, `✅ Новость отправлена в канал (msg #${messageId}).`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Unknown error';
+        console.error('[news] post failed:', err);
+        await db
+          .update(announcements)
+          .set({ errorMessage: msg.slice(0, 500) })
+          .where(eq(announcements.id, row.id));
+        await tgSend(authorId, `❌ Не удалось отправить: <code>${escapeHtml(msg)}</code>`);
+      }
+      return;
+    }
+
+    // Admin: cancel a prepared news post
+    if (actionId === 'news_cancel') {
+      if (!ADMIN_IDS.includes(authorId)) return;
+      await clearPendingNews(authorId);
+      await tgSend(authorId, '❌ Новость отменена.');
       return;
     }
 

@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { verifyAdmin } from '@/lib/admin-auth';
 import { invalidateProductsCache } from '@/lib/products-cache';
+import { markProductRemoved } from '@/lib/bot/broadcast';
 
 const UpdateProductSchema = z.object({
   name: z.string().min(1).max(200).optional(),
@@ -60,6 +61,15 @@ export async function PATCH(
   }
 
   try {
+    const [before] = await db
+      .select()
+      .from(products)
+      .where(eq(products.id, productId))
+      .limit(1);
+    if (!before) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
+
     const [updated] = await db
       .update(products)
       .set(updates)
@@ -70,6 +80,24 @@ export async function PATCH(
       return NextResponse.json({ error: 'Product not found' }, { status: 404 });
     }
     await invalidateProductsCache().catch(() => {});
+
+    // If the product is currently posted in the channel and transitions to
+    // "unavailable" (inactive or out of stock), edit the post to mark it removed.
+    // Non-fatal: any broadcast error is logged but doesn't fail the update.
+    const becameUnavailable =
+      updated.channelMessageId != null &&
+      ((before.active && !updated.active) || (before.stock > 0 && updated.stock === 0));
+    if (becameUnavailable && updated.channelMessageId != null) {
+      await markProductRemoved(updated.channelMessageId, {
+        id: updated.id,
+        name: updated.name,
+        description: updated.description,
+        priceUsdt: updated.priceUsdt,
+      }).catch((err) =>
+        console.error(`[PATCH /api/admin/products/${productId}] channel edit failed:`, err),
+      );
+    }
+
     return NextResponse.json(updated);
   } catch (err) {
     console.error('[PATCH /api/admin/products/:id]', err);
@@ -104,12 +132,22 @@ export async function DELETE(
         .update(products)
         .set({ active: false })
         .where(eq(products.id, productId))
-        .returning({ id: products.id });
+        .returning();
 
       if (!updated) {
         return NextResponse.json({ error: 'Product not found' }, { status: 404 });
       }
       await invalidateProductsCache().catch(() => {});
+      if (updated.channelMessageId != null) {
+        await markProductRemoved(updated.channelMessageId, {
+          id: updated.id,
+          name: updated.name,
+          description: updated.description,
+          priceUsdt: updated.priceUsdt,
+        }).catch((err) =>
+          console.error(`[DELETE /api/admin/products/${productId}] channel edit failed:`, err),
+        );
+      }
       return NextResponse.json({ deleted: false, deactivated: true });
     }
 
@@ -117,12 +155,22 @@ export async function DELETE(
     const [deleted] = await db
       .delete(products)
       .where(eq(products.id, productId))
-      .returning({ id: products.id });
+      .returning();
 
     if (!deleted) {
       return NextResponse.json({ error: 'Product not found' }, { status: 404 });
     }
     await invalidateProductsCache().catch(() => {});
+    if (deleted.channelMessageId != null) {
+      await markProductRemoved(deleted.channelMessageId, {
+        id: deleted.id,
+        name: deleted.name,
+        description: deleted.description,
+        priceUsdt: deleted.priceUsdt,
+      }).catch((err) =>
+        console.error(`[DELETE /api/admin/products/${productId}] channel edit failed:`, err),
+      );
+    }
     return NextResponse.json({ deleted: true, deactivated: false });
   } catch (err) {
     console.error('[DELETE /api/admin/products/:id]', err);

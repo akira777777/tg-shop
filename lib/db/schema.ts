@@ -26,6 +26,8 @@ export const products = pgTable('products', {
   imageUrl: text('image_url'),
   stock: integer('stock').notNull().default(0),
   active: boolean('active').notNull().default(true),
+  channelMessageId: integer('channel_message_id'),
+  channelPostedAt: timestamp('channel_posted_at'),
 });
 
 export const orders = pgTable(
@@ -92,3 +94,22 @@ export const suggestions = pgTable('suggestions', {
   description: text('description'),
   createdAt: timestamp('created_at').defaultNow(),
 });
+
+export const announcements = pgTable(
+  'announcements',
+  {
+    id: serial('id').primaryKey(),
+    text: text('text').notNull(),
+    createdByAdminId: bigint('created_by_admin_id', { mode: 'number' }).notNull(),
+    // 'admin_panel' | 'bot_command'
+    source: text('source').notNull().default('admin_panel'),
+    channelMessageId: integer('channel_message_id'),
+    sentAt: timestamp('sent_at'),
+    deletedAt: timestamp('deleted_at'),
+    errorMessage: text('error_message'),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (t) => ({
+    createdAtIdx: index('announcements_created_at_idx').on(t.createdAt),
+  }),
+);

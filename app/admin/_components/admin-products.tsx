@@ -14,6 +14,8 @@ interface AdminProduct {
   imageUrl: string | null;
   stock: number;
   active: boolean;
+  channelMessageId: number | null;
+  channelPostedAt: string | null;
 }
 
 const EMPTY_PRODUCT = {
@@ -119,6 +121,33 @@ export function AdminProducts({ authHeaders, onUnauthorized }: Props) {
     }
   };
 
+  const togglePublish = async (product: AdminProduct) => {
+    const isPublished = product.channelMessageId != null;
+    if (isPublished && !confirm('Снять товар с канала? Пост будет помечен «Снят с продажи».')) return;
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/products/${product.id}/publish`, {
+        method: isPublished ? 'DELETE' : 'POST',
+        headers: authHeaders(),
+      });
+      if (res.status === 401) { onUnauthorized(); return; }
+      if (res.status === 503) {
+        setError('Канал не настроен (BROADCAST_CHANNEL_ID).');
+        return;
+      }
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        const msg = body?.error ?? `HTTP ${res.status}`;
+        setError(typeof msg === 'string' ? msg : 'Ошибка публикации');
+        return;
+      }
+      const updated: AdminProduct = await res.json();
+      setProducts((prev) => prev.map((p) => p.id === updated.id ? updated : p));
+    } catch {
+      setError('Сетевая ошибка при публикации.');
+    }
+  };
+
   const createProduct = async () => {
     if (!newProduct.name || !newProduct.priceUsdt) return;
     setAddingProduct(true);
@@ -208,9 +237,21 @@ export function AdminProducts({ authHeaders, onUnauthorized }: Props) {
                     <span className="text-sm font-medium">{product.name}</span>
                     <span className="text-xs font-mono text-muted-foreground">${parseFloat(product.priceUsdt).toFixed(2)}</span>
                   </div>
-                  <p className="text-xs text-muted-foreground">{product.category} · В наличии: {product.stock}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {product.category} · В наличии: {product.stock}
+                    {product.channelMessageId != null && ' · 📣 в канале'}
+                  </p>
                   <div className="flex gap-2 justify-end pt-1 flex-wrap">
                     <Button size="sm" variant="outline" className="text-xs" onClick={() => setEditingProduct(product)}>Редактировать</Button>
+                    <Button
+                      size="sm"
+                      variant={product.channelMessageId != null ? 'outline' : 'default'}
+                      className="text-xs"
+                      onClick={() => togglePublish(product)}
+                      disabled={!product.active && product.channelMessageId == null}
+                    >
+                      {product.channelMessageId != null ? '❌ Снять с канала' : '📣 Опубликовать'}
+                    </Button>
                     <Button size="sm" variant={product.active ? 'destructive' : 'outline'} className="text-xs" onClick={() => toggleProduct(product.id, !product.active)}>
                       {product.active ? 'Деактивировать' : 'Активировать'}
                     </Button>

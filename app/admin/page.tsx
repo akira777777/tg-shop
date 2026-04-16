@@ -8,13 +8,15 @@ import { AdminSuggestions } from './_components/admin-suggestions';
 import { AdminStats } from './_components/admin-stats';
 import { AdminUsers } from './_components/admin-users';
 import { AdminDialogs } from './_components/admin-dialogs';
+import { AdminBroadcast } from './_components/admin-broadcast';
 
-type Tab = 'stats' | 'orders' | 'products' | 'users' | 'dialogs' | 'suggestions';
+type Tab = 'stats' | 'orders' | 'products' | 'users' | 'dialogs' | 'suggestions' | 'broadcast';
 
 const TABS: Array<{ id: Tab; label: string; icon: string }> = [
   { id: 'stats', label: 'Обзор', icon: '📊' },
   { id: 'orders', label: 'Заказы', icon: '📦' },
   { id: 'products', label: 'Товары', icon: '🛍️' },
+  { id: 'broadcast', label: 'Канал', icon: '📣' },
   { id: 'users', label: 'Юзеры', icon: '👥' },
   { id: 'dialogs', label: 'Диалоги', icon: '💬' },
   { id: 'suggestions', label: 'Идеи', icon: '💡' },
@@ -76,6 +78,7 @@ export default function AdminPage() {
         {activeTab === 'stats' && <AdminStats authHeaders={authHeaders} onUnauthorized={onUnauthorized} />}
         {activeTab === 'orders' && <AdminOrders authHeaders={authHeaders} onUnauthorized={onUnauthorized} />}
         {activeTab === 'products' && <AdminProducts authHeaders={authHeaders} onUnauthorized={onUnauthorized} />}
+        {activeTab === 'broadcast' && <AdminBroadcast authHeaders={authHeaders} onUnauthorized={onUnauthorized} />}
         {activeTab === 'users' && <AdminUsers authHeaders={authHeaders} onUnauthorized={onUnauthorized} />}
         {activeTab === 'dialogs' && <AdminDialogs authHeaders={authHeaders} onUnauthorized={onUnauthorized} />}
         {activeTab === 'suggestions' && <AdminSuggestions authHeaders={authHeaders} onUnauthorized={onUnauthorized} />}
