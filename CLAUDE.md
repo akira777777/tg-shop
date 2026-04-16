@@ -89,8 +89,11 @@ The bot uses Vercel's **Chat SDK** (`chat` + `@chat-adapter/telegram`).
   - `onSubscribedMessage` — dispatches commands, handles admin reply flow (thread state stores `pendingUserId`), notifies other admins when one replies.
   - `onAction` — inline button callbacks: `my_orders`, `contact_manager`, `suggest_product`, `admin_dialogs`, `admin_panel`, `admin_orders`, `admin_orders_f:<status>` (filtered orders), `reply_to:<id>` (shows conversation history), `admin_order_<id>`, `set_status_<id>_<status>`, `confirm_cancel_<id>`.
   - `cancelOrder()` — helper for order cancellation with stock restore, TRC20 address release, and status guard (`WHERE status NOT IN ('cancelled', 'delivered')`).
-- **Raw API fallback**: `lib/bot/telegram-api.ts` — `tgSend()` uses direct Telegram Bot API for `web_app` buttons and HTML parse mode, which Chat SDK doesn't expose.
+- **Raw API fallback**: `lib/bot/telegram-api.ts` — `tgSend()` / `tgEditMessageText()` / `tgDeleteMessage()` use direct Telegram Bot API for `web_app` buttons, HTML parse mode, and channel post editing (not exposed by Chat SDK). `tgSend()` returns `{ messageId }`.
 - **Notifications**: `lib/bot/notifications.ts` — `notifyPaymentConfirmed`, `notifyNewOrder`, `notifyOrderExpired`, `notifyOrderStatusChanged`, `notifyExpiryWarning`, `notifyNewSuggestion`. All use `tgSend()`. Pre-expiry warnings fire at 70% of `ORDER_TTL_MINUTES` and are deduplicated via Redis key `expiry_warn:<orderId>`.
+- **Broadcast channel**: `lib/bot/broadcast.ts` — `postAnnouncement()`, `postProduct()`, `markProductRemoved()`, `deleteChannelMessage()`. All target `BROADCAST_CHANNEL_ID`; if unset the helpers throw `BroadcastNotConfiguredError` (callers catch and degrade gracefully). Every broadcast-side failure is **non-fatal** at the call site — admin UI / bot flows never fail because a channel edit didn't go through. Product deactivation / stock-zero transitions in `PATCH /api/admin/products/[id]` automatically edit the existing channel post to "Снят с продажи" via `markProductRemoved()`. Note Telegram's **48h bot delete limit** — older posts can only be edited, not deleted.
+- **`/news` command**: admin-only conversation flow tracked via Redis key `pending_news:<adminId>` with stages `awaiting_text` / `awaiting_confirm`. In `handleAdminMessage`, pendingNews is checked **before** pendingReply so `/news` intent isn't hijacked by an open reply thread. `/cancel` clears both pending states. Confirmation inserts an `announcements` row (`source: 'bot_command'`), posts to the channel, then updates the row with `channelMessageId`/`sentAt` — or `errorMessage` on failure.
+- **Admin-scoped commands**: `lib/bot/setup.ts` calls `setMyCommands` with `scope: { type: 'chat', chat_id: <adminId> }` for each `ADMIN_CHAT_IDS` entry, so `/news` and `/cancel` appear only in admins' command menus. Run `npx tsx lib/bot/setup.ts` after changing admin IDs or command lists.
 - **Local dev**: `bot-poll.ts` (repo root) creates a **separate** `Chat` instance in polling mode (`mode: 'polling'`, `deleteWebhook: true`). It does not reuse `getBot()` from `lib/bot/index.ts`. **Warning**: Running `bot-poll.ts` deletes the production webhook. After switching back to production, re-register it:
   ```bash
   curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
@@ -102,11 +105,13 @@ Thread state type: `{ pendingUserId?: number; pendingUserLabel?: string }` — u
 
 ### Database
 
-Drizzle ORM with PostgreSQL (Neon). Schema at `lib/db/schema.ts`, config at `drizzle.config.ts`, migrations output to `./drizzle/`. Tables: `users`, `products`, `orders`, `order_items`, `messages`, `suggestions`.
+Drizzle ORM with PostgreSQL (Neon). Schema at `lib/db/schema.ts`, config at `drizzle.config.ts`, migrations output to `./drizzle/`. Tables: `users`, `products`, `orders`, `order_items`, `messages`, `suggestions`, `announcements`.
 
 Order status lifecycle: `pending` → `awaiting_payment` → `paid` → `processing` → `shipped` → `delivered` (or `cancelled`).
 
 The `messages` table tracks user↔admin relay conversations (direction: `user_to_admin` | `admin_to_user`).
+
+The `announcements` table stores broadcast-channel news posts (`source: 'admin_panel' | 'bot_command'`, plus `channelMessageId`, `sentAt`, `deletedAt`, `errorMessage`). Products also have `channelMessageId` / `channelPostedAt` columns to track whether they're currently posted to the broadcast channel.
 
 ### State Management
 
@@ -114,7 +119,7 @@ Cart is Zustand (`lib/cart-store.ts`) persisted to `localStorage`. No server-sid
 
 ### Admin
 
-`/admin` is a client-side dashboard protected by `lib/admin-auth.ts` (checks `ADMIN_CHAT_IDS`). It manages products, orders, and suggestions via `/api/admin/*` routes. There is no server-side middleware guarding `/admin` — protection is API-side only (each `/api/admin/*` route calls `verifyAdmin()`).
+`/admin` is a client-side dashboard protected by `lib/admin-auth.ts` (checks `ADMIN_CHAT_IDS`). It manages products, orders, suggestions, and the broadcast channel via `/api/admin/*` routes. There is no server-side middleware guarding `/admin` — protection is API-side only (each `/api/admin/*` route calls `verifyAdmin()`). Tab components live in `app/admin/_components/` (`admin-products.tsx`, `admin-orders.tsx`, `admin-users.tsx`, `admin-suggestions.tsx`, `admin-broadcast.tsx`, …) and all receive `authHeaders` + `onUnauthorized` props from `app/admin/page.tsx`.
 
 `GET /api/admin/me` — lightweight endpoint that returns `{ isAdmin: true }` or 401. Used by `BottomNav` to conditionally show the admin tab (⚙️) for admin users. The check runs once on component mount.
 
@@ -172,6 +177,7 @@ Two workflows in `.github/workflows/`:
 | `TELEGRAM_BOT_USERNAME` | Bot username (used by Chat SDK, defaults to `shopbot`) |
 | `ADMIN_CHAT_IDS` | Comma-separated admin Telegram user IDs |
 | `ADMIN_CHANNEL_ID` | Optional Telegram channel for payment notifications |
+| `BROADCAST_CHANNEL_ID` | Private channel ID for product drops and admin news (bot must be admin with Post/Edit/Delete). If unset, broadcast UI shows a warning and all helpers in `lib/bot/broadcast.ts` throw `BroadcastNotConfiguredError` — API routes return 503. |
 | `MINI_APP_URL` | Deployed app URL (used in bot buttons) |
 | `WEBHOOK_SECRET` | Secures the Telegram webhook endpoint (shared with Chat SDK adapter) |
 | `TRON_DEPOSIT_ADDRESS_POOL` | Comma-separated TRC20 USDT deposit addresses |
