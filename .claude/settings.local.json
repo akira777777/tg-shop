@@ -16,7 +16,9 @@
       "Bash(npx tsc:*)",
       "mcp__ruflo__system_status",
       "mcp__claude_ai_Context7__resolve-library-id",
-      "mcp__claude_ai_Context7__query-docs"
+      "mcp__claude_ai_Context7__query-docs",
+      "Bash(ls -la .env*)",
+      "Bash(grep -c TELEGRAM_BOT_TOKEN .env.local)"
     ]
   }
 }

@@ -66,6 +66,11 @@ To set up the QStash schedule: create a schedule in the Upstash console (or via 
 
 TRC20 uses idempotency on `txHash IS NULL` before marking paid. On success `notifyPaymentConfirmed()` is called.
 
+Shared helpers called from both the cron and the bot:
+
+- `lib/restore-stock.ts` — `restoreStock(orderIds, logPrefix)` aggregates quantities per product across cancelled orders and bumps `products.stock` with `Promise.allSettled` (one failure doesn't block others).
+- `lib/monitor-utils.ts` — `sendExpiryWarnings(orders, ttlMinutes)` fires the 70%-elapsed warning, deduplicated via the `expiry_warn:<orderId>` Redis key.
+
 ### Caching (Redis)
 
 | Key | TTL | Purpose |
@@ -76,6 +81,8 @@ TRC20 uses idempotency on `txHash IS NULL` before marking paid. On success `noti
 | `bot:webhook_ok` | 5 min | Healthy-state cache for `ensureWebhook()` self-healer |
 | `ratelimit:orders:{userId}` | 60 s | Order creation rate limit counter — max 5 orders per 60 s per user (set on first hit via `INCR`/`EXPIRE`) |
 | `expiry_warn:<orderId>` | ORDER_TTL_MINUTES × 60 s | Prevents duplicate pre-expiry payment warnings (SET NX) |
+| `admin:stats` | 30 s | `/api/admin/stats` payload — 12 aggregate queries run in parallel (`Promise.all`), result cached as a JSON string. Admin dashboard polls frequently; real-time isn't required. |
+| `pending_news:<adminId>` | — | `/news` command state machine (`awaiting_text` / `awaiting_confirm`). Checked **before** `pendingReply` so `/news` isn't hijacked by an open admin reply thread. |
 
 ### Telegram Bot (Chat SDK)
 
@@ -119,7 +126,9 @@ Cart is Zustand (`lib/cart-store.ts`) persisted to `localStorage`. No server-sid
 
 ### Admin
 
-`/admin` is a client-side dashboard protected by `lib/admin-auth.ts` (checks `ADMIN_CHAT_IDS`). It manages products, orders, suggestions, and the broadcast channel via `/api/admin/*` routes. There is no server-side middleware guarding `/admin` — protection is API-side only (each `/api/admin/*` route calls `verifyAdmin()`). Tab components live in `app/admin/_components/` (`admin-products.tsx`, `admin-orders.tsx`, `admin-users.tsx`, `admin-suggestions.tsx`, `admin-broadcast.tsx`, …) and all receive `authHeaders` + `onUnauthorized` props from `app/admin/page.tsx`.
+`/admin` is a client-side dashboard protected by `lib/admin-auth.ts` (checks `ADMIN_CHAT_IDS`). It manages products, orders, suggestions, and the broadcast channel via `/api/admin/*` routes. There is no server-side middleware guarding `/admin` — protection is API-side only (each `/api/admin/*` route calls `verifyAdmin()`). Tab components live in `app/admin/_components/` (`admin-stats.tsx`, `admin-products.tsx`, `admin-orders.tsx`, `admin-users.tsx`, `admin-dialogs.tsx`, `admin-suggestions.tsx`, `admin-broadcast.tsx`) and all receive `authHeaders` + `onUnauthorized` props from `app/admin/page.tsx`.
+
+`admin-dialogs.tsx` is the admin-side UI for the user↔admin relay. It reads `/api/admin/dialogs` (list of conversations) and `/api/admin/dialogs/[userId]` (single thread). Sending a reply from the UI reuses the same bot flow as inline `reply_to:<id>` in `handlers.ts`.
 
 `GET /api/admin/me` — lightweight endpoint that returns `{ isAdmin: true }` or 401. Used by `BottomNav` to conditionally show the admin tab (⚙️) for admin users. The check runs once on component mount.
 
