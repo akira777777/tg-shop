@@ -1,3 +1,5 @@
+import { log } from '@/lib/logger';
+
 function getTgApiBase(): string {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) throw new Error('[tg] TELEGRAM_BOT_TOKEN is not set');
@@ -36,7 +38,7 @@ const MAX_TEXT_LENGTH = 4096;
 
 function truncateText(text: string, kind: string): string {
   if (text.length <= MAX_TEXT_LENGTH) return text;
-  console.warn(`[tg] ${kind}: truncating ${text.length} → ${MAX_TEXT_LENGTH} chars`);
+  log.warn({ scope: 'tg', event: 'truncate', kind, from: text.length, to: MAX_TEXT_LENGTH });
   return text.slice(0, MAX_TEXT_LENGTH - 1) + '…';
 }
 
@@ -82,7 +84,7 @@ async function callTg(method: string, payload: object): Promise<unknown> {
 
       if (!retryable || attempt >= MAX_RETRIES) {
         const msg = `[tg] ${method} failed (${res.status}) after ${attempt} attempt(s): ${rawBody}`;
-        console.error(msg);
+        log.error({ scope: 'tg', event: 'call.failed', method, status: res.status, attempt, body: rawBody });
         throw new Error(msg);
       }
 
@@ -90,7 +92,15 @@ async function callTg(method: string, payload: object): Promise<unknown> {
       const delayMs = isRateLimited && retryAfterS
         ? retryAfterS * 1000 + 100
         : 500 * 2 ** (attempt - 1); // 500ms, 1s, 2s
-      console.warn(`[tg] ${method} ${res.status} — retry ${attempt}/${MAX_RETRIES} in ${delayMs}ms`);
+      log.warn({
+        scope: 'tg',
+        event: isRateLimited ? 'call.rate_limited' : 'call.retry',
+        method,
+        status: res.status,
+        attempt,
+        delayMs,
+        retryAfterS,
+      });
       await sleep(delayMs);
     }
   } finally {

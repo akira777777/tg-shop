@@ -84,16 +84,30 @@ export const messages = pgTable(
   (t) => ({
     directionIdx: index('messages_direction_idx').on(t.direction),
     userIdIdx: index('messages_user_id_idx').on(t.userId),
+    // Covers admin_dialogs "latest user_to_admin per user" query and the
+    // per-user history fetch in admin-dialogs page.
+    userDirectionCreatedIdx: index('messages_user_direction_created_idx').on(
+      t.userId,
+      t.direction,
+      t.createdAt,
+    ),
   })
 );
 
-export const suggestions = pgTable('suggestions', {
-  id: serial('id').primaryKey(),
-  userId: bigint('user_id', { mode: 'number' }).references(() => users.telegramId),
-  productName: text('product_name').notNull(),
-  description: text('description'),
-  createdAt: timestamp('created_at').defaultNow(),
-});
+export const suggestions = pgTable(
+  'suggestions',
+  {
+    id: serial('id').primaryKey(),
+    userId: bigint('user_id', { mode: 'number' }).references(() => users.telegramId),
+    productName: text('product_name').notNull(),
+    description: text('description'),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (t) => ({
+    userIdIdx: index('suggestions_user_id_idx').on(t.userId),
+    createdAtIdx: index('suggestions_created_at_idx').on(t.createdAt),
+  }),
+);
 
 export const announcements = pgTable(
   'announcements',

@@ -1,6 +1,7 @@
 import { checkPendingPayments as checkTronPayments } from '@/lib/tron/monitor';
 import { ensureWebhook } from '@/lib/bot/ensure-webhook';
 import { redis } from '@/lib/redis';
+import { log } from '@/lib/logger';
 import { NextRequest, NextResponse } from 'next/server';
 import { timingSafeEqual } from 'crypto';
 
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     ex: CRON_LOCK_TTL_S,
   });
   if (!lockAcquired) {
-    console.log('[cron] skipped: previous run still in progress');
+    log.warn({ scope: 'cron', event: 'skip.lock_held' });
     return NextResponse.json({ ok: true, skipped: 'locked' });
   }
 
@@ -45,13 +46,13 @@ export async function POST(req: NextRequest): Promise<Response> {
     const results = await Promise.allSettled([checkTronPayments(), ensureWebhook()]);
     for (const result of results) {
       if (result.status === 'rejected') {
-        console.error('[cron /api/payments/verify] Task threw:', result.reason);
+        log.error({ scope: 'cron', event: 'task.rejected', err: result.reason });
       }
     }
   } finally {
     // Release early so the next tick (≥55s later) always has a clean slate.
     await redis.del(CRON_LOCK_KEY).catch((err) =>
-      console.error('[cron] lock release failed:', err),
+      log.error({ scope: 'cron', event: 'lock.release_failed', err }),
     );
   }
 

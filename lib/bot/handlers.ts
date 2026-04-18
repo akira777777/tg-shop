@@ -107,10 +107,10 @@ const CALLBACK_PATTERNS = {
 const BOT_ACTION_RATE_USER = { limit: 20, windowS: 60 };
 const BOT_ACTION_RATE_ADMIN = { limit: 90, windowS: 60 };
 
-interface ThreadState {
-  pendingUserId?: number;
-  pendingUserLabel?: string;
-}
+// Pending-reply state lives in Redis (see consumePendingReply), not on the
+// thread. This alias matches the Chat SDK's default state type so it composes
+// cleanly with Chat<> / Thread<> generics elsewhere.
+type ThreadState = Record<string, unknown>;
 
 // Uses raw Telegram API so we can send web_app buttons (Chat SDK doesn't expose them)
 async function sendUserWelcome(userId: number): Promise<void> {
