@@ -12,6 +12,14 @@ import { restoreStock } from '@/lib/restore-stock';
 import { redis } from '@/lib/redis';
 import { isBroadcastConfigured, postAnnouncement } from './broadcast';
 
+function parseJsonMaybe<T>(raw: unknown): T | null {
+  if (!raw) return null;
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) as T; } catch { return null; }
+  }
+  return raw as T;
+}
+
 // ── Pending-reply state (Redis-backed, keyed by adminId) ─────────────────────
 // We don't use Chat SDK thread state for this because (a) setState({}) is a
 // no-op merge so state never clears, and (b) it has been unreliable across
@@ -23,13 +31,12 @@ type PendingReply = { userId: number; userLabel: string };
 async function setPendingReply(adminId: number, target: PendingReply): Promise<void> {
   await redis.set(pendingReplyKey(adminId), target, { ex: PENDING_REPLY_TTL_S });
 }
-async function getPendingReply(adminId: number): Promise<PendingReply | null> {
-  const raw = await redis.get<PendingReply | string>(pendingReplyKey(adminId));
-  if (!raw) return null;
-  if (typeof raw === 'string') {
-    try { return JSON.parse(raw) as PendingReply; } catch { return null; }
-  }
-  return raw;
+
+// Atomic read+delete — prevents two concurrent admin messages (same admin on
+// two devices) from both consuming the same pending and double-sending.
+async function consumePendingReply(adminId: number): Promise<PendingReply | null> {
+  const raw = await redis.getdel<PendingReply | string>(pendingReplyKey(adminId));
+  return parseJsonMaybe<PendingReply>(raw);
 }
 async function clearPendingReply(adminId: number): Promise<void> {
   await redis.del(pendingReplyKey(adminId));
@@ -47,14 +54,21 @@ type PendingNews =
 async function setPendingNews(adminId: number, state: PendingNews): Promise<void> {
   await redis.set(pendingNewsKey(adminId), state, { ex: PENDING_NEWS_TTL_S });
 }
-async function getPendingNews(adminId: number): Promise<PendingNews | null> {
+
+// Non-consuming read — used during /news conversation (state needs to persist
+// across text messages until the admin confirms or cancels).
+async function peekPendingNews(adminId: number): Promise<PendingNews | null> {
   const raw = await redis.get<PendingNews | string>(pendingNewsKey(adminId));
-  if (!raw) return null;
-  if (typeof raw === 'string') {
-    try { return JSON.parse(raw) as PendingNews; } catch { return null; }
-  }
-  return raw;
+  return parseJsonMaybe<PendingNews>(raw);
 }
+
+// Atomic read+delete — used on "Confirm send" button so a double-tap can't
+// post the announcement twice.
+async function consumePendingNews(adminId: number): Promise<PendingNews | null> {
+  const raw = await redis.getdel<PendingNews | string>(pendingNewsKey(adminId));
+  return parseJsonMaybe<PendingNews>(raw);
+}
+
 async function clearPendingNews(adminId: number): Promise<void> {
   await redis.del(pendingNewsKey(adminId));
 }
@@ -446,12 +460,23 @@ async function handleAdminMessage(
   // News composition has priority over any pending reply, since /news is the
   // active intent the admin just initiated. During 'awaiting_confirm', any new
   // text replaces the draft and re-renders the preview — convenient when the
-  // admin notices a typo after seeing the preview.
-  const pendingNews = await getPendingNews(authorId);
+  // admin notices a typo after seeing the preview. Peek (not consume) so the
+  // state survives across the text→confirm transition.
+  const pendingNews = await peekPendingNews(authorId);
   if (pendingNews) {
     const text = msgText.trim();
     if (!text) {
       await tgSend(authorId, '⚠️ Текст пустой. Пришлите сообщение ещё раз или /cancel.');
+      return;
+    }
+    // Telegram sendMessage text cap is 4096 chars. Reject explicitly so the
+    // admin can shorten rather than silently getting a truncated post.
+    if (text.length > 4000) {
+      await tgSend(
+        authorId,
+        `⚠️ Текст слишком длинный: <b>${text.length}</b> символов, максимум <b>4000</b>.\n` +
+          `Пришлите сокращённую версию или /cancel.`,
+      );
       return;
     }
     await setPendingNews(authorId, { stage: 'awaiting_confirm', text });
@@ -459,11 +484,12 @@ async function handleAdminMessage(
     return;
   }
 
-  const pending = await getPendingReply(authorId);
+  // Atomic get+delete so a second concurrent message from the same admin
+  // can't re-read the same pending reply and double-send.
+  const pending = await consumePendingReply(authorId);
   console.log(`[relay] admin ${authorId} message; pending=`, pending);
   if (pending?.userId) {
     const { userId: pendingUserId, userLabel: pendingUserLabel } = pending;
-    await clearPendingReply(authorId);
     try {
       const recipientLocale = await getUserLocale(pendingUserId);
       await tgSend(
@@ -681,13 +707,15 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
     // Admin: confirm sending a prepared news post
     if (actionId === 'news_confirm') {
       if (!ADMIN_IDS.includes(authorId)) return;
-      const state = await getPendingNews(authorId);
+      // Atomic consume so a double-tap can't post the same announcement twice.
+      const state = await consumePendingNews(authorId);
       if (state?.stage !== 'awaiting_confirm') {
+        // If we consumed an awaiting_text (rare: stale button tap), the admin
+        // has to restart — the draft body was never stored anyway.
         await tgSend(authorId, '⚠️ Нет новости в очереди. Начните заново с /news.');
         return;
       }
       const { text } = state;
-      await clearPendingNews(authorId);
 
       // Insert draft first so a delivery failure still leaves an audit row.
       const [row] = await db
