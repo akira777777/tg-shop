@@ -3,8 +3,7 @@ import { messages, users } from '@/lib/db/schema';
 import { eq, asc } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAdmin } from '@/lib/admin-auth';
-import { tgSend } from '@/lib/bot/telegram-api';
-import { getUserLocale, tr } from '@/lib/bot/user-lang';
+import { sendAdminReplyToUser } from '@/lib/bot/relay';
 
 /** GET /api/admin/dialogs/:userId — full conversation history */
 export async function GET(
@@ -70,16 +69,24 @@ export async function POST(
     return NextResponse.json({ error: 'Content required (≤4000 chars)' }, { status: 400 });
   }
 
-  const escape = (s: string) =>
-    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
   try {
-    const locale = await getUserLocale(userId);
-    await tgSend(userId, `${tr('reply.prefix', locale)}\n\n${escape(content)}`);
-    await db
-      .insert(messages)
-      .values({ userId, direction: 'admin_to_user', content })
-      .catch((err) => console.error('[admin dialog] DB insert failed:', err));
+    // Pull recipient label so the other-admin notification shows who replied.
+    const [recipient] = await db
+      .select({ username: users.username, firstName: users.firstName })
+      .from(users)
+      .where(eq(users.telegramId, userId))
+      .limit(1);
+    const userLabel = recipient?.username
+      ? `@${recipient.username}`
+      : (recipient?.firstName ?? `#${userId}`);
+
+    await sendAdminReplyToUser({
+      adminId: admin.id,
+      userId,
+      userLabel,
+      adminLabel: admin.username ? `@${admin.username}` : admin.first_name,
+      content,
+    });
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error('[POST /api/admin/dialogs/:userId]', err);
