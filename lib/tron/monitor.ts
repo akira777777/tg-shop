@@ -25,6 +25,104 @@ interface TronGridTx {
   block_timestamp: number; // milliseconds since epoch
 }
 
+// Cap concurrent TronGrid requests so we don't burst the public endpoint
+// (which rate-limits per API key) and so a backlog of 100 orders still fits
+// inside the cron's minute budget.
+const TRONGRID_CONCURRENCY = 5;
+
+type PendingOrder = Awaited<ReturnType<typeof fetchPendingOrders>>[number];
+
+async function fetchPendingOrders() {
+  return db
+    .select()
+    .from(orders)
+    .where(and(
+      inArray(orders.status, ['awaiting_payment', 'pending']),
+      eq(orders.paymentMethod, 'trc20'),
+    ));
+}
+
+/** Bounded-concurrency map. Preserves input order; rejections inside the
+ *  worker are surfaced to the caller as thrown errors — use try/catch inside. */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<R>,
+): Promise<void> {
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const idx = cursor++;
+      await worker(items[idx]);
+    }
+  });
+  await Promise.all(runners);
+}
+
+async function processPendingOrder(order: PendingOrder): Promise<void> {
+  try {
+    const res = await fetch(
+      `${TRONGRID_API}/v1/accounts/${order.paymentAddress}/transactions/trc20` +
+        `?contract_address=${USDT_CONTRACT}&limit=50&only_to=true`,
+      {
+        headers: {
+          'TRON-PRO-API-KEY': process.env.TRONGRID_API_KEY ?? '',
+        },
+        signal: AbortSignal.timeout(10_000),
+      }
+    );
+
+    if (!res.ok) {
+      console.error(`[tron-monitor] TronGrid error for order ${order.id}: ${res.status}`);
+      return;
+    }
+    const json = (await res.json()) as { data?: TronGridTx[] };
+    const txs = json.data ?? [];
+
+    // USDT has 6 decimals — order.totalUsdt stored as e.g. "10.500000"
+    // Parse string directly to avoid IEEE-754 float drift
+    const [whole, frac = ''] = order.totalUsdt.split('.');
+    const fracPadded = frac.padEnd(6, '0').slice(0, 6);
+    const requiredMicro = BigInt(whole) * BigInt(1_000_000) + BigInt(fracPadded);
+
+    // Only consider transactions that arrived AFTER this order was created.
+    // This prevents a recycled deposit address from matching a previous
+    // tenant's payment TX (C1 false-confirmation bug).
+    // If createdAt is somehow null, skip this order rather than matching all txs.
+    if (!order.createdAt) return;
+    const orderCreatedMs = new Date(order.createdAt).getTime();
+
+    const match = txs.find(
+      (tx) =>
+        tx.to === order.paymentAddress &&
+        BigInt(tx.value) >= requiredMicro &&
+        tx.block_timestamp >= orderCreatedMs &&
+        (CONFIRMATIONS_REQUIRED <= 1 || tx.confirmed)
+    );
+
+    if (match) {
+      // Idempotency guard: only update if txHash is not yet set
+      const updated = await db
+        .update(orders)
+        .set({ status: 'paid', txHash: match.transaction_id, paidAt: new Date() })
+        .where(and(eq(orders.id, order.id), isNull(orders.txHash)))
+        .returning({ id: orders.id });
+
+      if (updated.length > 0) {
+        // Return the address to the pool for reuse
+        await releaseAddress(order.paymentAddress).catch((err) =>
+          console.error(`[tron-monitor] Failed to release address for order ${order.id}:`, err)
+        );
+        if (order.userId) {
+          await notifyPaymentConfirmed(order.userId, order.id, match.transaction_id);
+        }
+      }
+    }
+  } catch (err) {
+    console.error(`[tron-monitor] Failed to check order ${order.id}:`, err);
+  }
+}
+
 /**
  * Polls TronGrid for all TRC20 orders in 'awaiting_payment' status.
  * Also expires stale orders older than ORDER_TTL_MINUTES.
@@ -35,80 +133,14 @@ export async function checkPendingPayments(): Promise<void> {
 
   // Also check 'pending' orders — user may have sent crypto but closed the app
   // before clicking "I sent payment", so the PATCH to awaiting_payment never fired.
-  const pending = await db
-    .select()
-    .from(orders)
-    .where(and(
-      inArray(orders.status, ['awaiting_payment', 'pending']),
-      eq(orders.paymentMethod, 'trc20'),
-    ));
+  const pending = await fetchPendingOrders();
 
   // Pre-expiry warnings (>70% of TTL elapsed, still unpaid)
   await sendExpiryWarnings(pending, ORDER_TTL_MINUTES);
 
-  for (const order of pending) {
-    try {
-      const res = await fetch(
-        `${TRONGRID_API}/v1/accounts/${order.paymentAddress}/transactions/trc20` +
-          `?contract_address=${USDT_CONTRACT}&limit=50&only_to=true`,
-        {
-          headers: {
-            'TRON-PRO-API-KEY': process.env.TRONGRID_API_KEY ?? '',
-          },
-          signal: AbortSignal.timeout(10_000),
-        }
-      );
-
-      if (!res.ok) {
-        console.error(`[tron-monitor] TronGrid error for order ${order.id}: ${res.status}`);
-        continue;
-      }
-      const json = (await res.json()) as { data?: TronGridTx[] };
-      const txs = json.data ?? [];
-
-      // USDT has 6 decimals — order.totalUsdt stored as e.g. "10.500000"
-      // Parse string directly to avoid IEEE-754 float drift
-      const [whole, frac = ''] = order.totalUsdt.split('.');
-      const fracPadded = frac.padEnd(6, '0').slice(0, 6);
-      const requiredMicro = BigInt(whole) * BigInt(1_000_000) + BigInt(fracPadded);
-
-      // Only consider transactions that arrived AFTER this order was created.
-      // This prevents a recycled deposit address from matching a previous
-      // tenant's payment TX (C1 false-confirmation bug).
-      // If createdAt is somehow null, skip this order rather than matching all txs.
-      if (!order.createdAt) continue;
-      const orderCreatedMs = new Date(order.createdAt).getTime();
-
-      const match = txs.find(
-        (tx) =>
-          tx.to === order.paymentAddress &&
-          BigInt(tx.value) >= requiredMicro &&
-          tx.block_timestamp >= orderCreatedMs &&
-          (CONFIRMATIONS_REQUIRED <= 1 || tx.confirmed)
-      );
-
-      if (match) {
-        // Idempotency guard: only update if txHash is not yet set
-        const updated = await db
-          .update(orders)
-          .set({ status: 'paid', txHash: match.transaction_id, paidAt: new Date() })
-          .where(and(eq(orders.id, order.id), isNull(orders.txHash)))
-          .returning({ id: orders.id });
-
-        if (updated.length > 0) {
-          // Return the address to the pool for reuse
-          await releaseAddress(order.paymentAddress).catch((err) =>
-            console.error(`[tron-monitor] Failed to release address for order ${order.id}:`, err)
-          );
-          if (order.userId) {
-            await notifyPaymentConfirmed(order.userId, order.id, match.transaction_id);
-          }
-        }
-      }
-    } catch (err) {
-      console.error(`[tron-monitor] Failed to check order ${order.id}:`, err);
-    }
-  }
+  // Parallel TronGrid polling — bounded to TRONGRID_CONCURRENCY so we don't
+  // stall the whole cron behind sequential 10s timeouts.
+  await mapWithConcurrency(pending, TRONGRID_CONCURRENCY, processPendingOrder);
 }
 
 async function expireStaleOrders(): Promise<void> {

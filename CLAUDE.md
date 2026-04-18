@@ -93,7 +93,7 @@ The bot uses Vercel's **Chat SDK** (`chat` + `@chat-adapter/telegram`).
 - **Handlers**: `lib/bot/handlers.ts` — all bot logic in `registerBotHandlers()`:
   - `dispatchCommand()` — shared command router for `/start`, `/status`, `/orders`, `/help`. Used by both `onDirectMessage` and `onSubscribedMessage` to avoid duplication.
   - `onDirectMessage` — subscribes thread, dispatches commands, relays free-text to admins.
-  - `onSubscribedMessage` — dispatches commands, handles admin reply flow (thread state stores `pendingUserId`), notifies other admins when one replies.
+  - `onSubscribedMessage` — dispatches commands, handles admin reply flow (pending target is stored in Redis under `pending_reply:<adminId>` and atomically consumed via `GETDEL`), notifies other admins when one replies.
   - `onAction` — inline button callbacks: `my_orders`, `contact_manager`, `suggest_product`, `admin_dialogs`, `admin_panel`, `admin_orders`, `admin_orders_f:<status>` (filtered orders), `reply_to:<id>` (shows conversation history), `admin_order_<id>`, `set_status_<id>_<status>`, `confirm_cancel_<id>`.
   - `cancelOrder()` — helper for order cancellation with stock restore, TRC20 address release, and status guard (`WHERE status NOT IN ('cancelled', 'delivered')`).
 - **Raw API fallback**: `lib/bot/telegram-api.ts` — `tgSend()` / `tgEditMessageText()` / `tgDeleteMessage()` use direct Telegram Bot API for `web_app` buttons, HTML parse mode, and channel post editing (not exposed by Chat SDK). `tgSend()` returns `{ messageId }`.
@@ -108,7 +108,7 @@ The bot uses Vercel's **Chat SDK** (`chat` + `@chat-adapter/telegram`).
     -d "secret_token=<WEBHOOK_SECRET>"
   ```
 
-Thread state type: `{ pendingUserId?: number; pendingUserLabel?: string }` — used for the admin reply-to-user flow.
+Thread state is empty (`Record<string, never>`) — the admin reply-to-user target is kept in Redis (`pending_reply:<adminId>`) so concurrent admin sessions can't drain the same pending slot.
 
 ### Database
 

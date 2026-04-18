@@ -9,8 +9,17 @@ import { getUserLocale, tr } from './user-lang';
 import { releaseAddress } from '@/lib/tron/pool';
 import { invalidateProductsCache } from '@/lib/products-cache';
 import { restoreStock } from '@/lib/restore-stock';
-import { redis } from '@/lib/redis';
+import { checkRateLimit, redis } from '@/lib/redis';
 import { isBroadcastConfigured, postAnnouncement } from './broadcast';
+import { escapeHtml as sharedEscapeHtml, sendAdminReplyToUser } from './relay';
+
+function parseJsonMaybe<T>(raw: unknown): T | null {
+  if (!raw) return null;
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) as T; } catch { return null; }
+  }
+  return raw as T;
+}
 
 // ── Pending-reply state (Redis-backed, keyed by adminId) ─────────────────────
 // We don't use Chat SDK thread state for this because (a) setState({}) is a
@@ -23,13 +32,12 @@ type PendingReply = { userId: number; userLabel: string };
 async function setPendingReply(adminId: number, target: PendingReply): Promise<void> {
   await redis.set(pendingReplyKey(adminId), target, { ex: PENDING_REPLY_TTL_S });
 }
-async function getPendingReply(adminId: number): Promise<PendingReply | null> {
-  const raw = await redis.get<PendingReply | string>(pendingReplyKey(adminId));
-  if (!raw) return null;
-  if (typeof raw === 'string') {
-    try { return JSON.parse(raw) as PendingReply; } catch { return null; }
-  }
-  return raw;
+
+// Atomic read+delete — prevents two concurrent admin messages (same admin on
+// two devices) from both consuming the same pending and double-sending.
+async function consumePendingReply(adminId: number): Promise<PendingReply | null> {
+  const raw = await redis.getdel<PendingReply | string>(pendingReplyKey(adminId));
+  return parseJsonMaybe<PendingReply>(raw);
 }
 async function clearPendingReply(adminId: number): Promise<void> {
   await redis.del(pendingReplyKey(adminId));
@@ -47,21 +55,28 @@ type PendingNews =
 async function setPendingNews(adminId: number, state: PendingNews): Promise<void> {
   await redis.set(pendingNewsKey(adminId), state, { ex: PENDING_NEWS_TTL_S });
 }
-async function getPendingNews(adminId: number): Promise<PendingNews | null> {
+
+// Non-consuming read — used during /news conversation (state needs to persist
+// across text messages until the admin confirms or cancels).
+async function peekPendingNews(adminId: number): Promise<PendingNews | null> {
   const raw = await redis.get<PendingNews | string>(pendingNewsKey(adminId));
-  if (!raw) return null;
-  if (typeof raw === 'string') {
-    try { return JSON.parse(raw) as PendingNews; } catch { return null; }
-  }
-  return raw;
+  return parseJsonMaybe<PendingNews>(raw);
 }
+
+// Atomic read+delete — used on "Confirm send" button so a double-tap can't
+// post the announcement twice.
+async function consumePendingNews(adminId: number): Promise<PendingNews | null> {
+  const raw = await redis.getdel<PendingNews | string>(pendingNewsKey(adminId));
+  return parseJsonMaybe<PendingNews>(raw);
+}
+
 async function clearPendingNews(adminId: number): Promise<void> {
   await redis.del(pendingNewsKey(adminId));
 }
 
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
+// Local alias for brevity; canonical implementation lives in ./relay to keep
+// admin UI and bot handler escaping in lockstep.
+const escapeHtml = sharedEscapeHtml;
 
 const STATUS_EMOJI: Record<string, string> = {
   pending: '🕐',
@@ -75,10 +90,27 @@ const STATUS_EMOJI: Record<string, string> = {
 
 const VALID_STATUSES = Object.keys(STATUS_EMOJI);
 
-interface ThreadState {
-  pendingUserId?: number;
-  pendingUserLabel?: string;
-}
+// Callback-data grammars. We send these ourselves, but a user CAN craft a
+// callback_query by inspecting the bot's inline keyboards (desktop dev tools)
+// and replaying with a modified payload. Reject anything that doesn't match
+// before passing into DB queries.
+const CALLBACK_PATTERNS = {
+  reply_to: /^reply_to:(\d{1,15})$/,
+  admin_order: /^admin_order_(\d{1,10})$/,
+  confirm_cancel: /^confirm_cancel_(\d{1,10})$/,
+  set_status: /^set_status_(\d{1,10})_([a-z_]{1,30})$/,
+  admin_orders_f: /^admin_orders_f:([a-z_]{1,30})$/,
+};
+
+// Per-action rate-limits applied inside onAction. Admins get a higher ceiling
+// since they legitimately tap through many buttons in the admin panel.
+const BOT_ACTION_RATE_USER = { limit: 20, windowS: 60 };
+const BOT_ACTION_RATE_ADMIN = { limit: 90, windowS: 60 };
+
+// Pending-reply state lives in Redis (see consumePendingReply), not on the
+// thread. This alias matches the Chat SDK's default state type so it composes
+// cleanly with Chat<> / Thread<> generics elsewhere.
+type ThreadState = Record<string, unknown>;
 
 // Uses raw Telegram API so we can send web_app buttons (Chat SDK doesn't expose them)
 async function sendUserWelcome(userId: number): Promise<void> {
@@ -446,12 +478,23 @@ async function handleAdminMessage(
   // News composition has priority over any pending reply, since /news is the
   // active intent the admin just initiated. During 'awaiting_confirm', any new
   // text replaces the draft and re-renders the preview — convenient when the
-  // admin notices a typo after seeing the preview.
-  const pendingNews = await getPendingNews(authorId);
+  // admin notices a typo after seeing the preview. Peek (not consume) so the
+  // state survives across the text→confirm transition.
+  const pendingNews = await peekPendingNews(authorId);
   if (pendingNews) {
     const text = msgText.trim();
     if (!text) {
       await tgSend(authorId, '⚠️ Текст пустой. Пришлите сообщение ещё раз или /cancel.');
+      return;
+    }
+    // Telegram sendMessage text cap is 4096 chars. Reject explicitly so the
+    // admin can shorten rather than silently getting a truncated post.
+    if (text.length > 4000) {
+      await tgSend(
+        authorId,
+        `⚠️ Текст слишком длинный: <b>${text.length}</b> символов, максимум <b>4000</b>.\n` +
+          `Пришлите сокращённую версию или /cancel.`,
+      );
       return;
     }
     await setPendingNews(authorId, { stage: 'awaiting_confirm', text });
@@ -459,37 +502,24 @@ async function handleAdminMessage(
     return;
   }
 
-  const pending = await getPendingReply(authorId);
+  // Atomic get+delete so a second concurrent message from the same admin
+  // can't re-read the same pending reply and double-send.
+  const pending = await consumePendingReply(authorId);
   console.log(`[relay] admin ${authorId} message; pending=`, pending);
   if (pending?.userId) {
     const { userId: pendingUserId, userLabel: pendingUserLabel } = pending;
-    await clearPendingReply(authorId);
+    const adminLabel = message.author.userName
+      ? `@${message.author.userName}`
+      : message.author.fullName;
     try {
-      const recipientLocale = await getUserLocale(pendingUserId);
-      await tgSend(
-        pendingUserId,
-        `${tr('reply.prefix', recipientLocale)}\n\n${escapeHtml(msgText)}`,
-      );
+      await sendAdminReplyToUser({
+        adminId: authorId,
+        userId: pendingUserId,
+        userLabel: pendingUserLabel,
+        adminLabel,
+        content: msgText,
+      });
       await thread.post(`✅ Ответ отправлен — ${pendingUserLabel}.`);
-      await db
-        .insert(messagesTable)
-        .values({ userId: pendingUserId, direction: 'admin_to_user', content: msgText })
-        .catch((err) => console.error('[relay] DB insert failed:', err));
-
-      const otherAdmins = ADMIN_IDS.filter((id) => id !== authorId);
-      if (otherAdmins.length > 0) {
-        const adminLabel = message.author.userName
-          ? `@${escapeHtml(message.author.userName)}`
-          : escapeHtml(message.author.fullName);
-        await Promise.allSettled(
-          otherAdmins.map((adminId) =>
-            tgSend(
-              adminId,
-              `📤 <b>${adminLabel}</b> ответил(а) пользователю <b>${escapeHtml(pendingUserLabel ?? '')}</b>:\n\n<i>${escapeHtml(msgText.slice(0, 200))}</i>`,
-            ),
-          ),
-        );
-      }
     } catch (err) {
       console.error('[relay] Failed to deliver admin reply:', err);
       await thread.post(
@@ -563,9 +593,32 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
   });
 
   // ── Actions (inline keyboard callbacks) ───────────────────────────────────
+  // The Telegram adapter auto-ACKs callback_query (see
+  // @chat-adapter/telegram:handleCallbackQuery), so we don't manually call
+  // answerCallbackQuery here — the spinner clears on its own.
   bot.onAction(async (event) => {
     const { actionId, user, thread } = event;
     const authorId = parseInt(user.userId, 10);
+    const isAdmin = ADMIN_IDS.includes(authorId);
+
+    // Rate-limit: prevent button-spam from hammering DB + Telegram API.
+    // Key includes isAdmin so ban-evasion via admin impersonation is moot.
+    const rate = isAdmin ? BOT_ACTION_RATE_ADMIN : BOT_ACTION_RATE_USER;
+    const allowed = await checkRateLimit(
+      `ratelimit:bot_action:${authorId}`,
+      rate.limit,
+      rate.windowS,
+    );
+    if (!allowed) {
+      console.warn(`[bot] action rate-limit hit: user=${authorId} action=${actionId}`);
+      // The auto-ack already cleared the spinner; a follow-up DM is the only
+      // way to surface rate-limit feedback since the adapter's silent ACK
+      // leaves no room for an alert toast.
+      await tgSend(authorId, '⏳ Слишком много действий. Подождите минуту.').catch(
+        (err) => console.error('[bot] rate-limit notice failed:', err),
+      );
+      return;
+    }
 
     // User: My Orders
     if (actionId === 'my_orders') {
@@ -594,7 +647,7 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
 
     // Admin: Recent dialogs (with message counts and timestamps)
     if (actionId === 'admin_dialogs') {
-      if (!ADMIN_IDS.includes(authorId)) return;
+      if (!isAdmin) return;
 
       const recent = await db
         .select({
@@ -666,28 +719,30 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
 
     // Admin: back to panel
     if (actionId === 'admin_panel') {
-      if (!ADMIN_IDS.includes(authorId)) return;
+      if (!isAdmin) return;
       await sendAdminPanel(authorId);
       return;
     }
 
     // Admin: start /news from the panel button
     if (actionId === 'admin_news') {
-      if (!ADMIN_IDS.includes(authorId)) return;
+      if (!isAdmin) return;
       await handleNewsStart(authorId);
       return;
     }
 
     // Admin: confirm sending a prepared news post
     if (actionId === 'news_confirm') {
-      if (!ADMIN_IDS.includes(authorId)) return;
-      const state = await getPendingNews(authorId);
+      if (!isAdmin) return;
+      // Atomic consume so a double-tap can't post the same announcement twice.
+      const state = await consumePendingNews(authorId);
       if (state?.stage !== 'awaiting_confirm') {
+        // If we consumed an awaiting_text (rare: stale button tap), the admin
+        // has to restart — the draft body was never stored anyway.
         await tgSend(authorId, '⚠️ Нет новости в очереди. Начните заново с /news.');
         return;
       }
       const { text } = state;
-      await clearPendingNews(authorId);
 
       // Insert draft first so a delivery failure still leaves an audit row.
       const [row] = await db
@@ -716,7 +771,7 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
 
     // Admin: cancel a prepared news post
     if (actionId === 'news_cancel') {
-      if (!ADMIN_IDS.includes(authorId)) return;
+      if (!isAdmin) return;
       await clearPendingNews(authorId);
       await tgSend(authorId, '❌ Новость отменена.');
       return;
@@ -724,7 +779,7 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
 
     // Admin: Orders — show filter menu
     if (actionId === 'admin_orders') {
-      if (!ADMIN_IDS.includes(authorId)) return;
+      if (!isAdmin) return;
       await tgSend(
         authorId,
         '📦 <b>Заказы — выберите фильтр:</b>',
@@ -750,8 +805,11 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
 
     // Admin: Filtered orders list
     if (actionId.startsWith('admin_orders_f:')) {
-      if (!ADMIN_IDS.includes(authorId)) return;
-      const filter = actionId.slice('admin_orders_f:'.length);
+      if (!isAdmin) return;
+      const m = CALLBACK_PATTERNS.admin_orders_f.exec(actionId);
+      if (!m) return;
+      const filter = m[1];
+      if (filter !== 'all' && !VALID_STATUSES.includes(filter)) return;
 
       const recent = filter === 'all'
         ? await db.select().from(orders).orderBy(desc(orders.createdAt)).limit(15)
@@ -784,8 +842,11 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
 
     // Admin: Set pending reply target (with conversation history)
     if (actionId.startsWith('reply_to:')) {
-      if (!ADMIN_IDS.includes(authorId)) return;
-      const userId = parseInt(actionId.slice('reply_to:'.length), 10);
+      if (!isAdmin) return;
+      const m = CALLBACK_PATTERNS.reply_to.exec(actionId);
+      if (!m) return;
+      const userId = parseInt(m[1], 10);
+      if (!Number.isFinite(userId) || userId <= 0) return;
 
       const [userRow] = await db
         .select({ username: users.username, firstName: users.firstName })
@@ -834,8 +895,10 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
 
     // Admin: Order detail with status buttons
     if (actionId.startsWith('admin_order_')) {
-      if (!ADMIN_IDS.includes(authorId)) return;
-      const orderId = parseInt(actionId.slice('admin_order_'.length), 10);
+      if (!isAdmin) return;
+      const m = CALLBACK_PATTERNS.admin_order.exec(actionId);
+      if (!m) return;
+      const orderId = parseInt(m[1], 10);
 
       const [order] = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
       if (!order) {
@@ -880,31 +943,27 @@ export function registerBotHandlers(bot: Chat<Record<string, Adapter>, ThreadSta
 
     // Admin: Confirm cancel on a paid order
     if (actionId.startsWith('confirm_cancel_')) {
-      if (!ADMIN_IDS.includes(authorId)) return;
-      const orderId = parseInt(actionId.slice('confirm_cancel_'.length), 10);
-      if (isNaN(orderId) || orderId <= 0) return;
+      if (!isAdmin) return;
+      const m = CALLBACK_PATTERNS.confirm_cancel.exec(actionId);
+      if (!m) return;
+      const orderId = parseInt(m[1], 10);
+      if (!Number.isFinite(orderId) || orderId <= 0) return;
       await cancelOrder(orderId, authorId);
       return;
     }
 
     // Admin: Apply status change
     if (actionId.startsWith('set_status_')) {
-      if (!ADMIN_IDS.includes(authorId)) return;
-      // Format: set_status_<orderId>_<status> — status itself may contain underscores
-      const withoutPrefix = actionId.slice('set_status_'.length);
-      const firstUnderscore = withoutPrefix.indexOf('_');
-      const orderId = parseInt(withoutPrefix.slice(0, firstUnderscore), 10);
-      const newStatus = withoutPrefix.slice(firstUnderscore + 1);
+      if (!isAdmin) return;
+      // Format: set_status_<orderId>_<status>. Regex caps status to a known
+      // alphabet so a crafted payload can't inject SQL or invalid enums.
+      const m = CALLBACK_PATTERNS.set_status.exec(actionId);
+      if (!m) return;
+      const orderId = parseInt(m[1], 10);
+      const newStatus = m[2];
 
-      if (isNaN(orderId) || orderId <= 0) {
-        await thread?.post('❌ Некорректный ID заказа.');
-        return;
-      }
-
-      if (!VALID_STATUSES.includes(newStatus)) {
-        await thread?.post('❌ Неверный статус.');
-        return;
-      }
+      if (!Number.isFinite(orderId) || orderId <= 0) return;
+      if (!VALID_STATUSES.includes(newStatus)) return;
 
       // Guard: cancelling a post-payment order requires confirmation
       if (newStatus === 'cancelled') {
